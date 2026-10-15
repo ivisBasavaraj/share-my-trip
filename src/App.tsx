@@ -21,10 +21,12 @@ import { TravelMap } from './components/Map/TravelMap';
 import { ItineraryEditor } from './components/Itinerary/ItineraryEditor';
 import { CompanionMatching } from './components/Companion/CompanionMatching';
 import { ExpenseTracker } from './components/Expenses/ExpenseTracker';
+import { OrganizerDashboard } from './components/Organizer/OrganizerDashboard';
 import { EncryptedChat } from './components/Chat/EncryptedChat';
 import { MemoryWall } from './components/Memories/MemoryWall';
 import { SafetyModal } from './components/Safety/SafetyModal';
 import { CreateTripModal } from './components/TripModal/CreateTripModal';
+import { TripDetailModal } from './components/TripModal/TripDetailModal';
 import { ServicesModal } from './components/ServicesModal';
 import { PackingChecklist } from './components/Packing/PackingChecklist';
 import { TripWeatherWidget } from './components/Weather/TripWeatherWidget';
@@ -35,15 +37,15 @@ import {
   Calendar, MapPin, IndianRupee, Sparkles, Navigation,
   ChevronDown, ArrowRight, ArrowLeft, MessageSquare, Package,
   CloudSun, Share2, Edit3, Users, Plus, Copy, CheckCircle2,
-  UserCheck, Clock, Loader2,
+  UserCheck, Clock, Car, Info,
 } from 'lucide-react';
 
 type AppView = 'home' | 'workspace' | 'login' | 'register';
-type WorkspaceTab = 'itinerary' | 'channel' | 'companions' | 'expenses' | 'memories' | 'packing';
+type WorkspaceTab = 'itinerary' | 'channel' | 'companions' | 'expenses' | 'memories' | 'packing' | 'organizer';
 type DashboardTab = 'available' | 'my' | 'joined';
 
 function MainApp() {
-  const { currentUser, firebaseUser, isOnline } = useAuth();
+  const { currentUser, firebaseUser, isOnline, allUsers } = useAuth();
 
   const [currentView, setCurrentView]   = useState<AppView>('home');
   const [trips, setTrips]               = useState<Trip[]>(() => getLocalTrips());
@@ -54,25 +56,8 @@ function MainApp() {
   const [pendingPinCoords, setPendingPinCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [waypoints, setWaypoints]       = useState<Waypoint[]>([]);
   const [copiedUid, setCopiedUid]       = useState(false);
-  // Track join-request state per trip in the dashboard
-  const [joinState, setJoinState] = useState<Record<string, 'idle'|'sending'|'sent'>>({});
-
-  const handleDashboardRequestJoin = useCallback(async (trip: Trip) => {
-    if (joinState[trip.id] === 'sent' || joinState[trip.id] === 'sending') return;
-    setJoinState(s => ({ ...s, [trip.id]: 'sending' }));
-    await sendCompanionRequestApi({
-      tripId:           trip.id,
-      tripTitle:        trip.title,
-      requesterId:      currentUser.id,
-      requesterName:    currentUser.displayName,
-      requesterAvatar:  currentUser.photoURL,
-      targetUserId:     trip.ownerId,
-      tripOwnerId:      trip.ownerId,
-      message:          `Hi! I would love to join your trip to ${trip.destination}. Please consider my request.`,
-      compatibilityScore: 80,
-    });
-    setJoinState(s => ({ ...s, [trip.id]: 'sent' }));
-  }, [currentUser, joinState]);
+  // TripDetailModal — shows full trip info when user clicks any trip card
+  const [detailTrip, setDetailTrip]     = useState<Trip | null>(null);
 
   // Modals
   const [showCreateTripModal, setShowCreateTripModal] = useState(false);
@@ -171,6 +156,7 @@ function MainApp() {
             onGoToLogin={() => setCurrentView('login')}
             onStartPlanning={() => setCurrentView('workspace')}
             onHostTrip={() => { setCurrentView('workspace'); setShowCreateTripModal(true); }}
+            onViewTripDetail={setDetailTrip}
           />
         </div>
       )}
@@ -221,7 +207,7 @@ function MainApp() {
                   <Share2 className="w-3.5 h-3.5" /> Share Plan
                 </button>
 
-                {activeTrip && (
+                {activeTrip?.ownerId === currentUser.id && (
                   <button onClick={() => setShowEditTripModal(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold bg-white hover:bg-orange-50 text-gray-700 border border-orange-200 transition-colors shadow-sm">
                     <Edit3 className="w-3.5 h-3.5 text-orange-500" /> Manage Trip
@@ -297,70 +283,93 @@ function MainApp() {
                 const list = dashTab === 'available' ? availableTrips : dashTab === 'my' ? myTrips : joinedTrips;
                 return list.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {list.map(trip => (
-                      <div key={trip.id} className="trip-card rounded-2xl overflow-hidden flex flex-col justify-between group">
-                        <div>
-                          <div className="relative aspect-[16/9] bg-orange-50 overflow-hidden">
-                            <img src={trip.coverImage || '/src/assets/images/hero_travel_journey_1791735781773.jpg'}
-                              alt={trip.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                            <div className="absolute top-2.5 right-2.5 bg-gray-900/80 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg capitalize">
-                              {trip.travelStyle}
-                            </div>
-                            <div className="absolute bottom-2.5 left-2.5">
-                              <span className="text-xs bg-gradient-to-r from-orange-500 to-rose-500 text-white px-2 py-0.5 rounded font-semibold uppercase">{trip.status}</span>
-                            </div>
-                          </div>
-                          <div className="p-4">
-                            <h3 className="font-bold text-gray-900 text-base mb-1 leading-snug">{trip.title}</h3>
-                            <div className="flex items-center gap-3 text-xs text-slate-500 mb-1 flex-wrap">
-                              <span className="flex items-center gap-1 text-gray-700 font-medium">
-                                <MapPin className="w-3.5 h-3.5 text-orange-500" />{trip.destination}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Calendar className="w-3.5 h-3.5 text-slate-400" />{trip.startDate}
-                              </span>
-                            </div>
-                            {/* Organiser + hosted date */}
-                            <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
-                              <span className="font-semibold text-orange-600">
-                                🧑 {allUsers.find(u => u.id === trip.ownerId)?.displayName || trip.ownerName}
-                              </span>
-                              <span>
-                                🕒 Posted {(() => { try { return new Date(trip.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return trip.startDate; } })()}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="px-4 pb-4 border-t border-orange-50 flex items-center justify-between pt-3">
+                    {list.map(trip => {
+                      const organiser      = allUsers.find(u => u.id === trip.ownerId);
+                      const availableSeats = Math.max(0, (trip.totalSeats ?? 0) - trip.memberIds.length);
+                      const postedDate     = (() => { try { return new Date(trip.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return trip.startDate; } })();
+
+                      return (
+                        <div key={trip.id} className="trip-card rounded-2xl overflow-hidden flex flex-col justify-between group">
                           <div>
-                            <div className="text-[11px] text-slate-400">Budget</div>
-                            <div className="text-sm font-bold text-gray-900">₹{trip.budget.toLocaleString('en-IN')}</div>
+                            <div className="relative aspect-[16/9] bg-orange-50 overflow-hidden">
+                              <img src={trip.coverImage || '/src/assets/images/hero_travel_journey_1791735781773.jpg'}
+                                alt={trip.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                              <div className="absolute top-2.5 right-2.5 bg-gray-900/80 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg capitalize">
+                                {trip.travelStyle}
+                              </div>
+                              <div className="absolute bottom-2.5 left-2.5 flex gap-1.5">
+                                <span className="text-xs bg-gradient-to-r from-orange-500 to-rose-500 text-white px-2 py-0.5 rounded font-semibold uppercase">{trip.status}</span>
+                                {trip.vehicle && (
+                                  <span className="text-xs bg-gray-900/70 text-white px-2 py-0.5 rounded font-semibold flex items-center gap-1">
+                                    <Car className="w-3 h-3" />{trip.vehicle}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="p-4">
+                              <h3 className="font-bold text-gray-900 text-base mb-1 leading-snug">{trip.title}</h3>
+                              {/* Route */}
+                              <div className="flex items-center gap-1.5 text-xs text-gray-700 font-medium mb-1">
+                                <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                                <span>{trip.origin}</span>
+                                <ArrowRight className="w-3 h-3 text-gray-400 shrink-0" />
+                                <span className="text-orange-600">{trip.destination}</span>
+                              </div>
+                              {/* Date / seats / cost */}
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 mb-1">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {trip.departureTime
+                                    ? new Date(trip.departureTime).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                                    : trip.startDate}
+                                </span>
+                                {trip.totalSeats && (
+                                  <span className={`flex items-center gap-1 font-semibold ${availableSeats === 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                                    <Users className="w-3 h-3" />{availableSeats === 0 ? 'Full' : `${availableSeats} seats left`}
+                                  </span>
+                                )}
+                                {trip.costPerPerson && (
+                                  <span className="font-semibold text-orange-600 flex items-center gap-0.5">
+                                    <IndianRupee className="w-3 h-3" />₹{trip.costPerPerson.toLocaleString('en-IN')}/seat
+                                  </span>
+                                )}
+                              </div>
+                              {/* Organiser + posted */}
+                              <div className="flex items-center gap-2 text-xs text-slate-400">
+                                {organiser ? (
+                                  <span className="flex items-center gap-1">
+                                    <img src={organiser.photoURL} alt="" className="w-4 h-4 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                    <span className="font-semibold text-orange-600">{organiser.displayName}</span>
+                                  </span>
+                                ) : (
+                                  <span className="font-semibold text-orange-600">{trip.ownerName}</span>
+                                )}
+                                <span>· Posted {postedDate}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex gap-2">
-                            {/* My Trips / Joined Trips → Open. Available Trips → Request to Join */}
-                            {dashTab === 'my' || dashTab === 'joined' ? (
-                              <button onClick={() => { setSelectedTripId(trip.id); setActiveTab('itinerary'); }}
-                                className="px-3.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
-                                Open Trip <ArrowRight className="w-3.5 h-3.5" />
-                              </button>
-                            ) : joinState[trip.id] === 'sent' ? (
-                              <div className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-xs font-semibold">
-                                <Clock className="w-3.5 h-3.5" /> Request Sent
-                              </div>
-                            ) : joinState[trip.id] === 'sending' ? (
-                              <div className="flex items-center gap-1.5 px-3.5 py-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-xl text-xs font-semibold">
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending…
-                              </div>
-                            ) : (
-                              <button onClick={() => handleDashboardRequestJoin(trip)}
-                                className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
-                                <UserCheck className="w-3.5 h-3.5" /> Request to Join
-                              </button>
-                            )}
+                          <div className="px-4 pb-4 border-t border-orange-50 flex items-center justify-between pt-3">
+                            <div>
+                              <div className="text-[11px] text-slate-400">Budget</div>
+                              <div className="text-sm font-bold text-gray-900">₹{trip.budget.toLocaleString('en-IN')}</div>
+                            </div>
+                            <div className="flex gap-2">
+                              {dashTab === 'my' || dashTab === 'joined' ? (
+                                <button onClick={() => { setSelectedTripId(trip.id); setActiveTab('itinerary'); }}
+                                  className="px-3.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
+                                  Open Trip <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <button onClick={() => setDetailTrip(trip)}
+                                  className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
+                                  <Info className="w-3.5 h-3.5" /> View &amp; Join
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : null;
               })()}
@@ -371,6 +380,7 @@ function MainApp() {
           <div className="bg-orange-50/80 border-t border-b border-orange-100 px-4 sm:px-6 py-2">
             <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto scrollbar-none text-xs">
               {([
+                ...(activeTrip?.ownerId === currentUser.id ? [{ id: 'organizer', icon: <Car className="w-3.5 h-3.5 text-amber-500" />, label: 'Organizer' }] : []),
                 { id: 'itinerary',  icon: <Navigation className="w-3.5 h-3.5 text-orange-500" />, label: 'Itinerary & Route' },
                 { id: 'channel',    icon: <MessageSquare className="w-3.5 h-3.5 text-orange-500" />, label: 'Group Channel', badge: true },
                 { id: 'packing',    icon: <Package className="w-3.5 h-3.5 text-blue-500" />, label: 'Packing' },
@@ -397,6 +407,10 @@ function MainApp() {
           {/* ── Workspace Body ─────────────────────── */}
           <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex-1 w-full space-y-6">
             {showWeatherDrawer && activeTrip && <TripWeatherWidget trip={activeTrip} />}
+
+            {activeTab === 'organizer' && activeTrip?.ownerId === currentUser.id && (
+              <OrganizerDashboard trip={activeTrip} onTripUpdated={handleTripUpdated} />
+            )}
 
             {activeTab === 'itinerary' && (
               <div className="space-y-6">
@@ -487,6 +501,20 @@ function MainApp() {
       {activeTrip && <TripExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} trip={activeTrip} waypoints={waypoints} />}
       {activeTrip && <EditTripModal  isOpen={showEditTripModal} trip={activeTrip} onClose={() => setShowEditTripModal(false)} onTripUpdated={handleTripUpdated} onTripDeleted={handleTripDeleted} />}
       <AdminPanelModal isOpen={showAdminModal} onClose={() => setShowAdminModal(false)} trips={trips} />
+
+      {/* TripDetailModal — full trip info + Request to Join */}
+      {detailTrip && (
+        <TripDetailModal
+          trip={detailTrip}
+          organiser={allUsers.find(u => u.id === detailTrip.ownerId)}
+          onClose={() => setDetailTrip(null)}
+          onOpenTrip={(id) => {
+            setSelectedTripId(id);
+            setActiveTab('itinerary');
+            setDetailTrip(null);
+          }}
+        />
+      )}
     </div>
   );
 }

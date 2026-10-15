@@ -48,13 +48,15 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({ trip }) => {
   }, [trip.id]);
 
   // ── Derived totals ──
-  const totalSpent   = expenses.reduce((acc, e) => acc + e.amount, 0);
-  const memberCount  = trip.memberIds.length || 1;
+  const totalSpent   = expenses.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+  // Owners count as passengers even if older documents list only invited guests.
+  const activePassengerIds = Array.from(new Set([trip.ownerId, ...(trip.memberIds || [])].filter(Boolean)));
+  const memberCount  = Math.max(activePassengerIds.length, 1);
   const perPersonAvg = totalSpent / memberCount;
 
   // Who paid how much
   const memberPaidMap: Record<string, number> = {};
-  trip.memberIds.forEach(id => { memberPaidMap[id] = 0; });
+  activePassengerIds.forEach(id => { memberPaidMap[id] = 0; });
   expenses.forEach(exp => {
     memberPaidMap[exp.paidBy] = (memberPaidMap[exp.paidBy] || 0) + exp.amount;
   });
@@ -78,7 +80,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({ trip }) => {
       paidBy:   currentUser.id,
       payerName: currentUser.displayName,
       category: newCategory,
-      splitWith: trip.memberIds,
+      splitWith: activePassengerIds,
       date:      new Date().toISOString().split('T')[0],
       createdAt: new Date().toISOString(),
     };
@@ -112,27 +114,27 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({ trip }) => {
 
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
-            <span>Average Per Traveler</span>
+            <span>Equal Split Per Passenger</span>
             <Receipt className="w-4 h-4 text-amber-600" />
           </div>
           <div className="text-2xl font-bold font-mono text-slate-900 tabular-nums">
             ₹{Math.round(perPersonAvg).toLocaleString('en-IN')}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            Split across {memberCount} partners
+            Total spend ÷ {memberCount} active passenger{memberCount === 1 ? '' : 's'}
           </div>
         </div>
 
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
-            <span>Estimated Savings vs Solo</span>
+            <span>Passengers Included</span>
             <Sparkles className="w-4 h-4 text-purple-600" />
           </div>
           <div className="text-2xl font-bold font-mono text-emerald-600 tabular-nums">
-            ₹{Math.round(totalSpent * 0.45).toLocaleString('en-IN')}
+            {memberCount}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            ~45% saved by sharing transport &amp; lodging
+            Host + confirmed members only
           </div>
         </div>
       </div>
@@ -144,7 +146,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({ trip }) => {
           <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div>
               <h3 className="font-bold text-slate-900 text-sm">Trip Expense Ledger (₹ INR)</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Automated bill splitting — live from Firestore</p>
+              <p className="text-xs text-slate-500 mt-0.5">Total group spend is divided equally across {memberCount} active passenger{memberCount === 1 ? '' : 's'}.</p>
             </div>
             <button
               onClick={() => setShowAddForm(v => !v)}
@@ -243,7 +245,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({ trip }) => {
                       ₹{exp.amount.toLocaleString('en-IN')}
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      ₹{Math.round(exp.amount / Math.max(exp.splitWith.length, 1)).toLocaleString('en-IN')} / person
+                      ₹{Math.round(exp.amount / memberCount).toLocaleString('en-IN')} / person
                     </div>
                   </div>
                 </div>

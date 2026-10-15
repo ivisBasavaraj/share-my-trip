@@ -22,7 +22,9 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
   const isLoggedIn  = !!firebaseUser;
   const isOwner     = currentUser.id === trip.ownerId;
   const isMember    = trip.memberIds.includes(currentUser.id);
-  const availableSeats = Math.max(0, (trip.totalSeats ?? 0) - trip.memberIds.length);
+  const availableSeats = trip.totalSeats != null
+    ? Math.max(0, trip.totalSeats - trip.memberIds.length)
+    : null;
 
   const [reqStatus, setReqStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [message,   setMessage]   = useState('');
@@ -109,6 +111,9 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
             <Detail icon={<Clock className="w-4 h-4 text-orange-500" />} label="Departure" value={formatDeparture()} />
             <Detail icon={<Calendar className="w-4 h-4 text-orange-400" />} label="Return" value={trip.endDate || '—'} />
             <Detail icon={<Car className="w-4 h-4 text-orange-500" />} label="Vehicle" value={trip.vehicle || '—'} />
+            {trip.vehicleNumber && (
+              <Detail icon={<Car className="w-4 h-4 text-slate-400" />} label="Reg. Number" value={trip.vehicleNumber} />
+            )}
             <Detail
               icon={<Users className="w-4 h-4 text-orange-500" />}
               label="Seats"
@@ -117,7 +122,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
                   ? `${availableSeats} available / ${trip.totalSeats} total`
                   : `${trip.memberIds.length} joined`
               }
-              highlight={availableSeats === 0}
+              highlight={availableSeats === 0 && trip.totalSeats != null}
             />
             <Detail
               icon={<IndianRupee className="w-4 h-4 text-emerald-600" />}

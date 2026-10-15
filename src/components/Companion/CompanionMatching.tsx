@@ -123,15 +123,38 @@ export const CompanionMatching: React.FC<CompanionMatchingProps> = ({
   };
 
   const handleRespond = async (requestId: string, status: 'accepted' | 'declined') => {
-    await respondToCompanionRequest(requestId, status, currentUser.id);
+    const targetReq = requests.find(r => r.id === requestId);
+
+    // Guard: check seat availability before accepting
+    if (status === 'accepted' && currentTrip && targetReq) {
+      const currentMembers = currentTrip.memberIds;
+      if (
+        currentTrip.totalSeats != null &&
+        currentMembers.length >= currentTrip.totalSeats
+      ) {
+        alert('Cannot accept: all seats are already filled.');
+        return;
+      }
+      if (currentMembers.includes(targetReq.requesterId)) {
+        alert('This traveler is already a member of the trip.');
+        return;
+      }
+    }
+
+    await respondToCompanionRequest(
+      requestId,
+      status,
+      currentUser.id,
+      currentTrip?.id,
+      targetReq?.requesterId
+    );
     await loadRequests();
 
-    if (status === 'accepted' && currentTrip && onTripUpdated) {
-      const targetReq = requests.find(r => r.id === requestId);
-      if (targetReq && !currentTrip.memberIds.includes(targetReq.requesterId)) {
+    if (status === 'accepted' && currentTrip && onTripUpdated && targetReq) {
+      if (!currentTrip.memberIds.includes(targetReq.requesterId)) {
         const updatedTrip: Trip = {
           ...currentTrip,
-          memberIds: [...currentTrip.memberIds, targetReq.requesterId]
+          memberIds: [...currentTrip.memberIds, targetReq.requesterId],
         };
         onTripUpdated(updatedTrip);
       }

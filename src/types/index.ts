@@ -62,6 +62,7 @@ export interface Trip {
   updatedAt?: string;
   // ── Ride-sharing specific fields ──
   vehicle?: string;          // e.g. "Car", "Van", "Bus"
+  vehicleNumber?: string;    // e.g. "KA-01-AB-1234"
   totalSeats?: number;       // total seats in vehicle
   costPerPerson?: number;    // cost per seat in ₹
   departureTime?: string;    // e.g. "2026-11-15T06:30"

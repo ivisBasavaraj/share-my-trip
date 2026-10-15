@@ -21,6 +21,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({ isOpen, onClos
   const [departureTime,  setDepartureTime]  = useState('');
   const [endDate,        setEndDate]        = useState('');
   const [vehicle,        setVehicle]        = useState('Car');
+  const [vehicleNumber,  setVehicleNumber]  = useState('');
   const [totalSeats,     setTotalSeats]     = useState('4');
   const [costPerPerson,  setCostPerPerson]  = useState('');
   const [travelStyle,    setTravelStyle]    = useState<TravelStyle>('adventure');
@@ -61,6 +62,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({ isOpen, onClos
       createdAt:       new Date().toISOString(),
       // ── Ride-sharing fields ──
       vehicle,
+      vehicleNumber:   vehicleNumber.trim().toUpperCase() || undefined,
       totalSeats:      seatsNum,
       costPerPerson:   costNum,
       departureTime,
@@ -90,7 +92,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({ isOpen, onClos
 
     // reset
     setTitle(''); setOrigin(''); setDestination(''); setDepartureTime('');
-    setEndDate(''); setVehicle('Car'); setTotalSeats('4'); setCostPerPerson('');
+    setEndDate(''); setVehicle('Car'); setVehicleNumber(''); setTotalSeats('4'); setCostPerPerson('');
     setSpotsInput(''); setNotes('');
   };
 
@@ -166,6 +168,17 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({ isOpen, onClos
               <input type="number" min="1" max="50" step="1" required placeholder="4"
                 value={totalSeats} onChange={e => setTotalSeats(e.target.value)} className={ic} />
             </div>
+          </div>
+
+          {/* Vehicle Number */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700">
+              <Car className="inline w-3.5 h-3.5 text-orange-400 mr-1" />Vehicle Registration Number
+            </label>
+            <input type="text" placeholder="e.g. KA-01-AB-1234"
+              value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)}
+              className={`${ic} font-mono uppercase`} />
+            <p className="text-[11px] text-gray-400 mt-1">Visible to accepted members only for safety.</p>
           </div>
 
           {/* Cost per Person */}

@@ -14,10 +14,11 @@ interface HomePageProps {
   onGoToLogin: () => void;
   onStartPlanning: () => void;
   onHostTrip: () => void;
+  onViewTripDetail: (trip: Trip) => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
-  trips, onOpenTrip, onGoToLogin, onStartPlanning, onHostTrip,
+  trips, onOpenTrip, onGoToLogin, onStartPlanning, onHostTrip, onViewTripDetail,
 }) => {
   const { currentUser, firebaseUser, allUsers } = useAuth();
   const isLoggedIn = !!firebaseUser;
@@ -25,11 +26,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   // Single combined search
   const [locationQuery, setLocationQuery] = useState('');
   const [selectedStyle,  setSelectedStyle]  = useState('all');
-
-  // Track join request state per trip: 'idle' | 'sending' | 'sent' | 'already'
   const [joinState, setJoinState] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
-
-  // Filter trips
   const filteredTrips = trips.filter(t => {
     const q      = locationQuery.trim().toLowerCase();
     const styleOk = selectedStyle === 'all' || t.travelStyle === selectedStyle;
@@ -305,7 +302,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                         </span>
                         <span className="flex items-center gap-1">
                           <Users className="w-3.5 h-3.5 text-slate-400" />
-                          {trip.memberIds.length} joined
+                          {trip.totalSeats
+                            ? `${Math.max(0, trip.totalSeats - trip.memberIds.length)} / ${trip.totalSeats} seats`
+                            : `${trip.memberIds.length} joined`}
                         </span>
                       </div>
 

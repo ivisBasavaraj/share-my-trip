@@ -616,12 +616,14 @@ app.get('/api/trips/:id/expenses', (req: Request, res: Response) => {
   if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
 
   const expenses = expensesDb.filter(e => e.tripId === req.params.id);
+  // Treat the host as an active passenger even where legacy trips only stored guests.
+  const activePassengerIds = [...new Set([trip.ownerId, ...(trip.memberIds || [])].filter(Boolean))];
   const totalSpent = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-  const perPersonAvg = trip.memberIds.length > 0 ? totalSpent / trip.memberIds.length : totalSpent;
+  const perPersonAvg = totalSpent / Math.max(activePassengerIds.length, 1);
 
   // Calculate settlement balances in ₹
   const balances: Record<string, { paid: number; share: number; netBalance: number }> = {};
-  trip.memberIds.forEach(m => {
+  activePassengerIds.forEach(m => {
     balances[m] = { paid: 0, share: perPersonAvg, netBalance: -perPersonAvg };
   });
 
@@ -660,7 +662,7 @@ app.post('/api/trips/:id/expenses', (req: Request, res: Response) => {
     paidBy: body.paidBy || 'user_bhandavya',
     payerName: body.payerName || 'Bhandavya H M',
     category: body.category || 'food',
-    splitWith: body.splitWith || trip.memberIds,
+    splitWith: body.splitWith || [...new Set([trip.ownerId, ...(trip.memberIds || [])].filter(Boolean))],
     date: body.date || new Date().toISOString().split('T')[0],
     createdAt: new Date().toISOString()
   };

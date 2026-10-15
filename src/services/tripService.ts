@@ -1154,15 +1154,31 @@ export async function respondToCompanionRequest(
     try { await updateDoc(doc(db, 'trips', tripId, 'companionRequests', requestId), { status }); }
     catch { /* offline */ }
 
-    // on accept: add requester to trip.memberIds
+    // on accept: add requester to trip.memberIds only if a seat is available
     if (status === 'accepted' && requesterId) {
       try {
         const tripRef  = doc(db, 'trips', tripId);
         const tripSnap = await getDoc(tripRef);
         if (tripSnap.exists()) {
-          const members: string[] = (tripSnap.data() as Trip).memberIds || [];
+          const tripData = tripSnap.data() as Trip;
+          const members: string[] = tripData.memberIds || [];
+          const totalSeats: number | undefined = tripData.totalSeats;
+
+          // Block if seats are full
+          if (totalSeats != null && members.length >= totalSeats) {
+            console.warn('Cannot accept request: no seats available.');
+            return false;
+          }
+
           if (!members.includes(requesterId)) {
             await updateDoc(tripRef, { memberIds: [...members, requesterId] });
+            // Also update localStorage cache
+            const cached = getLocalTrips();
+            const idx = cached.findIndex(t => t.id === tripId);
+            if (idx >= 0 && !cached[idx].memberIds.includes(requesterId)) {
+              cached[idx].memberIds = [...cached[idx].memberIds, requesterId];
+              saveLocalTrips(cached);
+            }
           }
         }
       } catch (err) { console.warn('Failed to add member to trip:', err); }

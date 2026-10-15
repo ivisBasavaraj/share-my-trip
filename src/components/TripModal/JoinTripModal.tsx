@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Trip } from '../../types';
 import { useAuth } from '../../context/useAuth';
 import { updateTrip } from '../../services/tripService';
-import { X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, Car, Users } from 'lucide-react';
 
 interface JoinTripModalProps {
   trip: Trip;
@@ -42,7 +42,12 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
 
   const costNote = trip.itinerary?.[0]?.notes || '';
   const costMatch = costNote.match(/Cost\/person: ₹([\d,]+)/);
-  const costPerPerson = costMatch ? costMatch[1] : '—';
+  const costPerPerson = trip.costPerPerson
+    ? trip.costPerPerson.toLocaleString('en-IN')
+    : costMatch ? costMatch[1] : '—';
+  const availableSeats = trip.totalSeats != null
+    ? Math.max(0, trip.totalSeats - trip.memberIds.length)
+    : null;
 
   const ic = 'w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-orange-400 focus:outline-none text-sm bg-white mt-1';
 
@@ -106,6 +111,28 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                 <div className="grid grid-cols-2 gap-3 mt-3 text-sm">
                   <div><p className="text-xs text-gray-400">Date</p><p className="font-medium text-gray-800">{trip.startDate}</p></div>
                   <div><p className="text-xs text-gray-400">Cost / person</p><p className="font-medium text-emerald-700">₹{costPerPerson}</p></div>
+                  {trip.vehicle && (
+                    <div className="flex items-center gap-1.5">
+                      <Car className="w-3.5 h-3.5 text-sky-500" />
+                      <div>
+                        <p className="text-xs text-gray-400">Vehicle</p>
+                        <p className="font-medium text-gray-800">
+                          {trip.vehicle}{trip.vehicleNumber ? ` · ${trip.vehicleNumber}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {trip.totalSeats != null && (
+                    <div className="flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-sky-500" />
+                      <div>
+                        <p className="text-xs text-gray-400">Seats</p>
+                        <p className={`font-medium ${availableSeats === 0 ? 'text-red-600' : 'text-gray-800'}`}>
+                          {availableSeats} available / {trip.totalSeats} total
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -184,6 +211,15 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                   <p><strong>From:</strong> {trip.origin}</p>
                   <p><strong>To:</strong> {trip.destination}</p>
                   <p><strong>Date:</strong> {trip.startDate}</p>
+                  {trip.vehicle && <p><strong>Vehicle:</strong> {trip.vehicle}{trip.vehicleNumber ? ` · ${trip.vehicleNumber}` : ''}</p>}
+                  {trip.totalSeats != null && (
+                    <p>
+                      <strong>Seats:</strong>{' '}
+                      <span className={availableSeats === 0 ? 'text-red-600 font-bold' : 'text-gray-800'}>
+                        {availableSeats} available / {trip.totalSeats} total
+                      </span>
+                    </p>
+                  )}
                   <p><strong>Amount:</strong> <span className="text-emerald-700 font-bold">₹{costPerPerson}</span></p>
                 </div>
               </div>
