@@ -1,0 +1,178 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Traveler profile with identity verification and preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 1000 },
+        "bio": { "type": "string", "maxLength": 500 },
+        "travelStyle": { "type": "string", "maxLength": 50 },
+        "verificationStatus": { "type": "string", "enum": ["verified", "pending", "unverified"] },
+        "rating": { "type": "number" },
+        "ratingCount": { "type": "number" },
+        "interests": { "type": "array" },
+        "emergencyContact": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "displayName", "verificationStatus"]
+    },
+    "Trip": {
+      "title": "Trip",
+      "description": "Collaborative trip details, members, and route metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 150 },
+        "destination": { "type": "string", "maxLength": 100 },
+        "origin": { "type": "string", "maxLength": 100 },
+        "startDate": { "type": "string", "maxLength": 50 },
+        "endDate": { "type": "string", "maxLength": 50 },
+        "budget": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "travelStyle": { "type": "string", "maxLength": 50 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "ownerName": { "type": "string", "maxLength": 100 },
+        "memberIds": { "type": "array" },
+        "spotsToVisit": { "type": "array" },
+        "status": { "type": "string", "enum": ["planning", "confirmed", "active", "completed"] },
+        "encryptionKeyId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "destination", "ownerId", "memberIds", "status"]
+    },
+    "ItineraryItem": {
+      "title": "ItineraryItem",
+      "description": "Real-time editable waypoint and activity on the trip route",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tripId": { "type": "string", "maxLength": 128 },
+        "dayNumber": { "type": "number" },
+        "title": { "type": "string", "maxLength": 150 },
+        "locationName": { "type": "string", "maxLength": 200 },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "time": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "orderIndex": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tripId", "dayNumber", "title", "lat", "lng", "authorId"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Shared expense entry for group budget tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tripId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 150 },
+        "amount": { "type": "number" },
+        "paidBy": { "type": "string", "maxLength": 128 },
+        "payerName": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 50 },
+        "splitWith": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tripId", "title", "amount", "paidBy"]
+    },
+    "Memory": {
+      "title": "Memory",
+      "description": "Travel moment, photo journal, and diary entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tripId": { "type": "string", "maxLength": 128 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "caption": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 1000 },
+        "location": { "type": "string", "maxLength": 150 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tripId", "authorId", "caption"]
+    },
+    "EncryptedMessage": {
+      "title": "EncryptedMessage",
+      "description": "End-to-end encrypted group chat message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tripId": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "encryptedPayload": { "type": "string", "maxLength": 5000 },
+        "iv": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tripId", "senderId", "encryptedPayload", "iv"]
+    },
+    "CompanionRequest": {
+      "title": "CompanionRequest",
+      "description": "Travel companion request and matching connection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tripId": { "type": "string", "maxLength": 128 },
+        "requesterId": { "type": "string", "maxLength": 128 },
+        "requesterName": { "type": "string", "maxLength": 100 },
+        "tripOwnerId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "message": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tripId", "requesterId", "tripOwnerId", "status"]
+    },
+    "SystemPing": {
+      "title": "SystemPing",
+      "description": "System health and round-trip ping verification document",
+      "type": "object",
+      "properties": {
+        "lastPing": { "type": "string" },
+        "client": { "type": "string" },
+        "timestamp": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/system_health/{healthId}": {
+      "schema": { "$ref": "#/entities/SystemPing" },
+      "description": "Live Firestore round-trip ping and health check endpoint"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Traveler user profile and identity verification"
+    },
+    "/trips/{tripId}": {
+      "schema": { "$ref": "#/entities/Trip" },
+      "description": "Trip itineraries and membership"
+    },
+    "/trips/{tripId}/itinerary/{itemId}": {
+      "schema": { "$ref": "#/entities/ItineraryItem" },
+      "description": "Subcollection of waypoints and activities for a trip"
+    },
+    "/trips/{tripId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Subcollection of expenses for a trip"
+    },
+    "/trips/{tripId}/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/Memory" },
+      "description": "Subcollection of memories uploaded for a trip"
+    },
+    "/trips/{tripId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/EncryptedMessage" },
+      "description": "Subcollection of E2E encrypted messages for trip participants"
+    },
+    "/companion_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/CompanionRequest" },
+      "description": "Companion matching requests between travelers"
+    }
+  }
+}

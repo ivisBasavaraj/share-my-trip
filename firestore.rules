@@ -1,0 +1,206 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Default deny ──────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function isTripMember(tripId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/trips/$(tripId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.memberIds;
+    }
+    function isTripOwner(tripId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/trips/$(tripId)) &&
+        request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId;
+    }
+
+    // ── Health / test ─────────────────────────────────────────────────────────
+    match /test/connection {
+      allow read: if true;
+    }
+    match /system_health/{healthId} {
+      allow read, write: if true;
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Any signed-in user can read profiles (for companion matching)
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) &&
+        incoming().keys().hasAll(['id', 'displayName', 'verificationStatus']) &&
+        incoming().displayName is string && incoming().displayName.size() <= 100 &&
+        incoming().verificationStatus in ['unverified', 'pending', 'verified'];
+      allow update: if isSignedIn() && request.auth.uid == userId &&
+        incoming().id == existing().id &&
+        incoming().displayName is string && incoming().displayName.size() <= 100;
+      allow delete: if false;
+    }
+
+    // ── Trips ─────────────────────────────────────────────────────────────────
+    match /trips/{tripId} {
+      // Any signed-in user can read trips (for homepage listing & matching)
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(tripId) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().keys().hasAll(['id', 'title', 'destination', 'ownerId', 'memberIds', 'status']) &&
+        incoming().title is string && incoming().title.size() <= 150 &&
+        incoming().destination is string && incoming().destination.size() <= 100 &&
+        incoming().memberIds is list && incoming().memberIds.size() <= 30 &&
+        incoming().status in ['planning', 'confirmed', 'active', 'completed'];
+
+      allow update: if isSignedIn() && (
+        // Trip owner full edit
+        (existing().ownerId == request.auth.uid &&
+         incoming().ownerId == existing().ownerId &&
+         incoming().title is string && incoming().title.size() <= 150) ||
+        // Members updating limited fields
+        (request.auth.uid in existing().memberIds &&
+         incoming().ownerId == existing().ownerId &&
+         incoming().diff(existing()).affectedKeys()
+           .hasOnly(['memberIds', 'status', 'updatedAt', 'spotsToVisit'])) ||
+        // Joining via companion request (memberIds only)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['memberIds']) &&
+         incoming().memberIds.size() <= 30)
+      );
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      // ── Itinerary waypoints ─────────────────────────────────────────────────
+      match /itinerary/{itemId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(itemId) && isTripMember(tripId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().keys().hasAll(['id', 'tripId', 'dayNumber', 'title', 'lat', 'lng', 'authorId']) &&
+          incoming().title is string && incoming().title.size() <= 150 &&
+          incoming().lat is number && incoming().lng is number;
+        allow update: if isSignedIn() && isTripMember(tripId) &&
+          incoming().id == existing().id &&
+          incoming().tripId == existing().tripId &&
+          incoming().title is string && incoming().title.size() <= 150;
+        allow delete: if isSignedIn() && isTripMember(tripId);
+      }
+
+      // ── Expenses ────────────────────────────────────────────────────────────
+      match /expenses/{expenseId} {
+        allow read: if isSignedIn() && isTripMember(tripId);
+        allow create: if isSignedIn() && isValidId(expenseId) && isTripMember(tripId) &&
+          incoming().keys().hasAll(['id', 'tripId', 'title', 'amount', 'paidBy']) &&
+          incoming().amount is number &&
+          incoming().title is string && incoming().title.size() <= 150;
+        allow update: if isSignedIn() && isTripMember(tripId) &&
+          incoming().id == existing().id && incoming().tripId == existing().tripId;
+        allow delete: if isSignedIn() && isTripMember(tripId);
+      }
+
+      // ── Packing items ───────────────────────────────────────────────────────
+      match /packing/{packId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(packId);
+        allow update: if isSignedIn();
+        allow delete: if isSignedIn();
+      }
+
+      // ── Memories ────────────────────────────────────────────────────────────
+      match /memories/{memoryId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(memoryId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().keys().hasAll(['id', 'tripId', 'authorId', 'caption']) &&
+          incoming().caption is string && incoming().caption.size() <= 500;
+        allow update: if isSignedIn();
+        allow delete: if isSignedIn() && (
+          existing().authorId == request.auth.uid || isTripOwner(tripId)
+        );
+      }
+
+      // ── Group messages ──────────────────────────────────────────────────────
+      // Open channel: any signed-in user can read & write messages.
+      // This allows demo users (who are Firebase-auth'd via Google or email)
+      // to participate in the live chat without being in memberIds.
+      match /messages/{messageId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn() && isValidId(messageId) &&
+          incoming().keys().hasAll(['id', 'tripId', 'senderId']);
+        allow update: if isSignedIn(); // reactions, poll votes
+        allow delete: if isSignedIn() && (
+          existing().senderId == request.auth.uid || isTripOwner(tripId)
+        );
+      }
+
+      // ── Companion requests (subcollection) ──────────────────────────────────
+      match /companionRequests/{requestId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn() && isValidId(requestId) &&
+          incoming().requesterId == request.auth.uid &&
+          incoming().keys().hasAll(['id', 'tripId', 'requesterId', 'status']) &&
+          incoming().status == 'pending';
+        allow update: if isSignedIn() && (
+          existing().tripOwnerId == request.auth.uid ||
+          existing().requesterId == request.auth.uid
+        );
+        allow delete: if isSignedIn() && (
+          existing().requesterId == request.auth.uid ||
+          existing().tripOwnerId == request.auth.uid
+        );
+      }
+    }
+
+    // ── Top-level companion_requests (legacy path) ────────────────────────────
+    match /companion_requests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.requesterId == request.auth.uid ||
+        resource.data.tripOwnerId == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(requestId) &&
+        incoming().requesterId == request.auth.uid &&
+        incoming().keys().hasAll(['id', 'tripId', 'requesterId', 'tripOwnerId', 'status']) &&
+        incoming().status == 'pending';
+      allow update: if isSignedIn() && (
+        existing().tripOwnerId == request.auth.uid ||
+        existing().requesterId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && (
+        existing().requesterId == request.auth.uid ||
+        existing().tripOwnerId == request.auth.uid
+      );
+    }
+
+    // ── Top-level companionRequests (new path with targetUserId) ──────────────
+    match /companionRequests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.requesterId  == request.auth.uid ||
+        resource.data.targetUserId == request.auth.uid ||
+        resource.data.tripOwnerId  == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(requestId) &&
+        incoming().requesterId == request.auth.uid &&
+        incoming().status == 'pending';
+      allow update: if isSignedIn() && (
+        existing().tripOwnerId  == request.auth.uid ||
+        existing().targetUserId == request.auth.uid ||
+        existing().requesterId  == request.auth.uid
+      );
+      allow delete: if isSignedIn() && (
+        existing().requesterId  == request.auth.uid ||
+        existing().tripOwnerId  == request.auth.uid
+      );
+    }
+  }
+}
