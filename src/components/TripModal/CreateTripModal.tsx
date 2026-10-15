@@ -99,8 +99,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({ isOpen, onClos
   const ic = 'w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-sm bg-white';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-xl w-full p-8 shadow-2xl border border-orange-100 relative my-8">
+    <div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto">
+      <div className="min-h-full flex items-start justify-center p-4 py-8">
+        <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-orange-100 relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors">
           <X className="w-5 h-5" />
         </button>
@@ -234,6 +235,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({ isOpen, onClos
             </button>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );

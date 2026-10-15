@@ -430,7 +430,7 @@ export const TravelMap: React.FC<TravelMapProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[440px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm flex flex-col">
+    <div className="relative w-full h-full min-h-[440px] rounded-2xl border border-slate-200 bg-slate-100 shadow-sm flex flex-col" style={{ isolation: 'isolate' }}>
       {/* Top Map Action Bar */}
       <div className="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between pointer-events-none flex-wrap gap-2">
         {/* Left Route Stats Card */}
@@ -552,11 +552,11 @@ export const TravelMap: React.FC<TravelMapProps> = ({
 
       {/* Map Views: MapLibre GL JS vs Google Maps vs Leaflet */}
       {mapEngine === 'maplibre' && (
-        <div ref={maplibreContainerRef} className="w-full h-full flex-1 z-0" style={{ minHeight: '420px' }} />
+        <div ref={maplibreContainerRef} className="w-full h-full flex-1 z-0 rounded-2xl overflow-hidden" style={{ minHeight: '420px' }} />
       )}
 
       {mapEngine === 'google' && (
-        <div className="w-full h-full flex-1 z-0 relative" style={{ minHeight: '420px' }}>
+        <div className="w-full h-full flex-1 z-0 relative rounded-2xl overflow-hidden" style={{ minHeight: '420px' }}>
           <GoogleMapView
             apiKey={googleApiKey}
             waypoints={waypoints}
@@ -573,7 +573,7 @@ export const TravelMap: React.FC<TravelMapProps> = ({
       )}
 
       {mapEngine === 'leaflet' && (
-        <div ref={leafletContainerRef} className="w-full h-full flex-1 z-0" style={{ minHeight: '420px' }} />
+        <div ref={leafletContainerRef} className="w-full h-full flex-1 z-0 rounded-2xl overflow-hidden" style={{ minHeight: '420px' }} />
       )}
 
       {/* MapLibre Active Badge in corner */}

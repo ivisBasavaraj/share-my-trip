@@ -81,8 +81,9 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto my-8">
+    <div className="fixed inset-0 bg-black/50 z-[100] overflow-y-auto">
+      <div className="min-h-full flex items-start justify-center p-4 py-8">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl">
 
         {/* Header */}
         <div className="flex justify-between items-start p-6 border-b border-gray-100">
@@ -299,6 +300,7 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
               </button>
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

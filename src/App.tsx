@@ -32,7 +32,6 @@ import { PackingChecklist } from './components/Packing/PackingChecklist';
 import { TripWeatherWidget } from './components/Weather/TripWeatherWidget';
 import { TripExportModal } from './components/Export/TripExportModal';
 import { EditTripModal } from './components/TripModal/EditTripModal';
-import { AdminPanelModal } from './components/Admin/AdminPanelModal';
 import {
   Calendar, MapPin, IndianRupee, Sparkles, Navigation,
   ChevronDown, ArrowRight, ArrowLeft, MessageSquare, Package,
@@ -62,7 +61,6 @@ function MainApp() {
   // Modals
   const [showCreateTripModal, setShowCreateTripModal] = useState(false);
   const [showEditTripModal,   setShowEditTripModal]   = useState(false);
-  const [showAdminModal,      setShowAdminModal]      = useState(false);
   const [showSafetyModal,     setShowSafetyModal]     = useState(false);
   const [showServicesModal,   setShowServicesModal]   = useState(false);
   const [showExportModal,     setShowExportModal]     = useState(false);
@@ -144,7 +142,6 @@ function MainApp() {
         onOpenRegister={() => setCurrentView('register')}
         onOpenServicesModal={() => setShowServicesModal(true)}
         onOpenExportModal={() => setShowExportModal(true)}
-        onOpenAdmin={() => setShowAdminModal(true)}
       />
 
       {/* ── HOME ─────────────────────────────────── */}
@@ -424,7 +421,7 @@ function MainApp() {
                         onClearPendingPin={() => setPendingPinCoords(null)} />
                     )}
                   </div>
-                  <div className="lg:col-span-7 h-[620px]">
+                  <div className="lg:col-span-7 h-[620px]" style={{ isolation: 'isolate' }}>
                     <TravelMap waypoints={waypoints} activeWaypointId={activeWaypoint?.id}
                       onSelectWaypoint={wp => setActiveWaypoint(wp)}
                       onMapClick={(lat, lng) => { setPendingPinCoords({ lat, lng }); setActiveTab('itinerary'); }}
@@ -500,8 +497,6 @@ function MainApp() {
       <ServicesModal   isOpen={showServicesModal}   onClose={() => setShowServicesModal(false)} />
       {activeTrip && <TripExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} trip={activeTrip} waypoints={waypoints} />}
       {activeTrip && <EditTripModal  isOpen={showEditTripModal} trip={activeTrip} onClose={() => setShowEditTripModal(false)} onTripUpdated={handleTripUpdated} onTripDeleted={handleTripDeleted} />}
-      <AdminPanelModal isOpen={showAdminModal} onClose={() => setShowAdminModal(false)} trips={trips} />
-
       {/* TripDetailModal — full trip info + Request to Join */}
       {detailTrip && (
         <TripDetailModal

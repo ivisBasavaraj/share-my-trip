@@ -57,8 +57,9 @@ export const TripExportModal: React.FC<TripExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 print:p-0 print:bg-white">
-      <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:border-none">
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white">
+      <div className="min-h-full flex items-start justify-center p-4 py-8 print:p-0">
+        <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col print:shadow-none print:border-none">
         {/* Header (Hidden in Print) */}
         <div className="p-4 bg-slate-900 text-white flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
@@ -154,6 +155,7 @@ export const TripExportModal: React.FC<TripExportModalProps> = ({
               <span>Print / Save PDF</span>
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>

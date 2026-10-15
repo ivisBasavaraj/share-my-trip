@@ -67,8 +67,9 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-orange-100 my-8 overflow-hidden">
+    <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm overflow-y-auto">
+      <div className="min-h-full flex items-start justify-center p-4 py-8">
+        <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-orange-100 overflow-hidden">
 
         {/* Cover image header */}
         <div className="relative h-48 bg-orange-50">
@@ -255,6 +256,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
     </div>

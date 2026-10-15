@@ -15,7 +15,6 @@ interface HeaderProps {
   onOpenRegister?: () => void;
   onOpenServicesModal?: () => void;
   onOpenExportModal?: () => void;
-  onOpenAdmin?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,13 +23,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateTrip,
   onOpenLogin,
   onOpenRegister,
-  onOpenAdmin,
 }) => {
   const { currentUser, firebaseUser, logout } = useAuth();
   const isLoggedIn = !!firebaseUser;
-  const isAdmin = isLoggedIn &&
-    currentUser.verificationStatus === 'verified' &&
-    (currentUser.id === 'user_bhandavya' || currentUser.email?.includes('admin'));
 
   return (
     <header className="bg-white/95 shadow-md sticky top-0 z-40 backdrop-blur-sm border-b border-orange-100">
@@ -90,15 +85,6 @@ export const Header: React.FC<HeaderProps> = ({
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                   )}
                 </div>
-
-                {isAdmin && onOpenAdmin && (
-                  <button
-                    onClick={onOpenAdmin}
-                    className="ml-1 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-orange-600 transition-colors"
-                  >
-                    Admin
-                  </button>
-                )}
 
                 <button
                   onClick={logout}
