@@ -478,8 +478,7 @@ function MainApp() {
       <footer className="bg-gray-800 text-gray-300 mt-16">
         <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center">
           <p className="font-semibold">
-            &copy; 2025 Smart Ride Sharing Platform. All rights reserved to{' '}
-            <span className="text-orange-400">Bhandavya H M, Anusha K N, Bharath G, Dhanush Gowda B K</span>.
+            &copy; 2025 Smart Ride Sharing Platform. All rights reserved.
           </p>
           <p className="mt-2 text-sm text-gray-400">Travel Together, Save Together.</p>
           <p className="mt-1 text-xs text-gray-500">
