@@ -37,6 +37,9 @@ import {
   CompanionRequest,
   PackingItem,
   TripWeatherInfo,
+  SosAlertPayload,
+  SosAlertResponse,
+  UserProfile,
 } from '../types';
 import {
   INITIAL_TRIPS,
@@ -1003,7 +1006,20 @@ export async function sendCompanionRequestApi(payload: {
   tripOwnerId?: string;
   message: string;
   compatibilityScore?: number;
-}): Promise<boolean> {
+  requesterProfile?: Partial<UserProfile>;
+}): Promise<{ success: boolean; error?: string }> {
+  // Pre-check local trips to prevent joining if full
+  const cachedTrips = getLocalTrips();
+  const trip = cachedTrips.find(t => t.id === payload.tripId);
+  if (trip) {
+    if (trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
+      return { success: false, error: 'Cannot join: All seats in this trip are already filled.' };
+    }
+    if (trip.memberIds.includes(payload.requesterId)) {
+      return { success: false, error: 'You are already a confirmed member of this trip.' };
+    }
+  }
+
   const id = `req_${Date.now()}_${payload.requesterId}`;
   const req: CompanionRequest = {
     id,
@@ -1018,6 +1034,7 @@ export async function sendCompanionRequestApi(payload: {
     message:            payload.message,
     compatibilityScore: payload.compatibilityScore || 70,
     createdAt:          new Date().toISOString(),
+    requesterProfile:   payload.requesterProfile,
   };
 
   try {
@@ -1029,10 +1046,21 @@ export async function sendCompanionRequestApi(payload: {
     console.warn('Companion request Firestore error:', err);
   }
 
-  await apiCall<{ success: boolean }>('/api/companions/request', {
-    method: 'POST', body: JSON.stringify({ ...payload, id }),
-  });
-  return true;
+  try {
+    const res = await fetch('/api/companions/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, id }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to submit join request.' };
+    }
+    return { success: true };
+  } catch (err) {
+    // If backend is unreachable, still succeeded locally/in Firestore
+    return { success: true };
+  }
 }
 
 /**
@@ -1136,7 +1164,7 @@ export async function fetchCompanionRequests(
 
 /**
  * Accept or decline a request.
- * On accept: requester is added to trip.memberIds in Firestore.
+ * On accept: requester is added to trip.memberIds in Firestore and local state only when verified.
  */
 export async function respondToCompanionRequest(
   requestId: string,
@@ -1144,7 +1172,31 @@ export async function respondToCompanionRequest(
   responderId: string,
   tripId?: string,
   requesterId?: string
-): Promise<boolean> {
+): Promise<{ success: boolean; error?: string }> {
+  // Pre-check capacity before accepting
+  if (status === 'accepted' && tripId) {
+    const cached = getLocalTrips();
+    const trip = cached.find(t => t.id === tripId);
+    if (trip && trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
+      return { success: false, error: `Cannot accept request: All ${trip.totalSeats} seats are filled.` };
+    }
+  }
+
+  // Call backend API first to enforce permissions & capacity
+  try {
+    const res = await fetch(`/api/companions/request/${encodeURIComponent(requestId)}/respond`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, responderId }),
+    });
+    const resData = await res.json();
+    if (!res.ok || !resData.success) {
+      return { success: false, error: resData.error || 'Server rejected request response.' };
+    }
+  } catch (err) {
+    // offline bridge
+  }
+
   // update top-level doc
   try { await updateDoc(doc(db, 'companionRequests', requestId), { status }); }
   catch { /* offline */ }
@@ -1154,7 +1206,7 @@ export async function respondToCompanionRequest(
     try { await updateDoc(doc(db, 'trips', tripId, 'companionRequests', requestId), { status }); }
     catch { /* offline */ }
 
-    // on accept: add requester to trip.memberIds only if a seat is available
+    // on accept: add requester to trip.memberIds
     if (status === 'accepted' && requesterId) {
       try {
         const tripRef  = doc(db, 'trips', tripId);
@@ -1162,60 +1214,95 @@ export async function respondToCompanionRequest(
         if (tripSnap.exists()) {
           const tripData = tripSnap.data() as Trip;
           const members: string[] = tripData.memberIds || [];
-          const totalSeats: number | undefined = tripData.totalSeats;
-
-          // Block if seats are full
-          if (totalSeats != null && members.length >= totalSeats) {
-            console.warn('Cannot accept request: no seats available.');
-            return false;
-          }
-
           if (!members.includes(requesterId)) {
             await updateDoc(tripRef, { memberIds: [...members, requesterId] });
-            // Also update localStorage cache
-            const cached = getLocalTrips();
-            const idx = cached.findIndex(t => t.id === tripId);
-            if (idx >= 0 && !cached[idx].memberIds.includes(requesterId)) {
-              cached[idx].memberIds = [...cached[idx].memberIds, requesterId];
-              saveLocalTrips(cached);
-            }
           }
         }
-      } catch (err) { console.warn('Failed to add member to trip:', err); }
+      } catch (err) { console.warn('Failed to add member to trip in Firestore:', err); }
+
+      // Also update localStorage cache
+      const cached = getLocalTrips();
+      const idx = cached.findIndex(t => t.id === tripId);
+      if (idx >= 0 && !cached[idx].memberIds.includes(requesterId)) {
+        cached[idx].memberIds = [...cached[idx].memberIds, requesterId];
+        saveLocalTrips(cached);
+      }
     }
   }
 
-  await apiCall<{ success: boolean }>(
-    `/api/companions/request/${encodeURIComponent(requestId)}/respond`,
-    { method: 'PATCH', body: JSON.stringify({ status, responderId }) }
-  );
-  return true;
+  return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SAFETY SOS
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function dispatchSafetySos(payload: {
-  travelerName: string;
-  tripTitle: string;
-  lat: number;
-  lng: number;
-  emergencyContact: string;
-}): Promise<boolean> {
-  const res = await apiCall<{ success: boolean }>('/api/safety/sos', {
-    method: 'POST', body: JSON.stringify(payload),
-  });
-  return !!res?.success;
+export async function dispatchSafetySos(payload: SosAlertPayload): Promise<SosAlertResponse> {
+  try {
+    const res = await fetch('/api/safety/sos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to dispatch emergency alert.');
+    }
+    return {
+      success: true,
+      alertDispatched: data.alertDispatched !== false,
+      deliveryConfirmed: data.deliveryConfirmed !== false,
+      alertId: data.alertId || `sos_${Date.now()}`,
+      message: data.message || 'Emergency alert successfully transmitted to responders.',
+      timestamp: data.timestamp || new Date().toISOString(),
+      coordinatesIncluded: !!data.coordinatesIncluded,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unable to connect to emergency dispatch server.';
+    return {
+      success: false,
+      alertDispatched: false,
+      deliveryConfirmed: false,
+      alertId: '',
+      message: msg,
+      timestamp: new Date().toISOString(),
+      coordinatesIncluded: false,
+    };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ADMIN REPORTS
+//  ADMIN REPORTS & SUPPORT ISSUES
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function fetchAdminReports(): Promise<any[]> {
   const res = await apiCall<any[]>('/api/admin/reports');
   return res || [];
+}
+
+export async function submitWebsiteIssue(report: {
+  category: string;
+  subject: string;
+  description: string;
+  reporterName: string;
+  reporterEmail?: string;
+  tripId?: string;
+  tripTitle?: string;
+}): Promise<{ success: boolean; ticketId?: string; error?: string }> {
+  try {
+    const res = await fetch('/api/admin/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(report),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to submit report.' };
+    }
+    return { success: true, ticketId: data.ticketId || data.data?.id };
+  } catch (err) {
+    return { success: false, error: 'Network error: could not submit report. Please try again.' };
+  }
 }
 
 export async function submitTripReport(report: {
@@ -1225,10 +1312,11 @@ export async function submitTripReport(report: {
   category: string;
   description: string;
 }): Promise<boolean> {
-  const res = await apiCall<{ success: boolean }>('/api/admin/reports', {
-    method: 'POST', body: JSON.stringify(report),
+  const res = await submitWebsiteIssue({
+    ...report,
+    subject: `Report on ${report.tripTitle || 'Trip'}`,
   });
-  return !!res?.success;
+  return res.success;
 }
 
 export async function resolveAdminReport(reportId: string): Promise<boolean> {

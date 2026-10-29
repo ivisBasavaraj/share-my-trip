@@ -156,6 +156,42 @@ export interface CompanionRequest {
   message: string;
   compatibilityScore: number;
   createdAt: string;
+  requesterProfile?: Partial<UserProfile>;
+}
+
+export interface SupportIssue {
+  id: string;
+  category: string;
+  subject: string;
+  description: string;
+  reporterName: string;
+  reporterEmail?: string;
+  tripId?: string;
+  tripTitle?: string;
+  status: 'open' | 'investigating' | 'resolved';
+  createdAt: string;
+}
+
+export interface SosAlertPayload {
+  travelerId?: string;
+  travelerName: string;
+  tripId?: string;
+  tripTitle: string;
+  lat?: number | null;
+  lng?: number | null;
+  accuracy?: number | null;
+  locationPermission?: 'granted' | 'denied' | 'unavailable';
+  emergencyContact: string;
+}
+
+export interface SosAlertResponse {
+  success: boolean;
+  alertDispatched: boolean;
+  deliveryConfirmed: boolean;
+  alertId: string;
+  message: string;
+  timestamp: string;
+  coordinatesIncluded: boolean;
 }
 
 declare global {

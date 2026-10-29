@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Trip } from '../../types';
 import { useAuth } from '../../context/useAuth';
 import { sendCompanionRequestApi } from '../../services/tripService';
 import {
   MapPin, ArrowRight, Plus, Search, Star, ShieldCheck,
   IndianRupee, Calendar, Users, UserCheck, Clock, CheckCircle2,
-  Loader2, User
+  Loader2, User, Compass, Navigation, Car, AlertCircle, RefreshCw, X,
+  Filter, Sparkles
 } from 'lucide-react';
 
 interface HomePageProps {
@@ -23,25 +24,78 @@ export const HomePage: React.FC<HomePageProps> = ({
   const { currentUser, firebaseUser, allUsers } = useAuth();
   const isLoggedIn = !!firebaseUser;
 
-  // Single combined search
-  const [locationQuery, setLocationQuery] = useState('');
-  const [selectedStyle,  setSelectedStyle]  = useState('all');
+  // Multi-criteria search inputs: Source, Destination, and Places
+  const [sourceQuery, setSourceQuery] = useState('');
+  const [destinationQuery, setDestinationQuery] = useState('');
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState('all');
+
+  // Loading, Empty, and Error states
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const [joinState, setJoinState] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
-  const filteredTrips = trips.filter(t => {
-    const q      = locationQuery.trim().toLowerCase();
-    const styleOk = selectedStyle === 'all' || t.travelStyle === selectedStyle;
-    const locOk   = !q ||
-      (t.origin || '').toLowerCase().includes(q) ||
-      t.destination.toLowerCase().includes(q) ||
-      t.title.toLowerCase().includes(q) ||
-      t.spotsToVisit.some(sp => sp.toLowerCase().includes(q));
-    return styleOk && locOk;
-  });
+  const [joinError, setJoinError] = useState<Record<string, string>>({});
+
+  // Dynamic popular places extracted from actual trips in database (no hardcoding / no paid APIs)
+  const popularPlaces = useMemo(() => {
+    const places = new Set<string>();
+    trips.forEach(t => {
+      if (t.destination) places.add(t.destination.split(',')[0].trim());
+      if (t.origin) places.add(t.origin.split(',')[0].trim());
+      (t.spotsToVisit || []).forEach(s => places.add(s.trim()));
+    });
+    return Array.from(places).filter(Boolean).slice(0, 8);
+  }, [trips]);
+
+  // Debounce search state to display smooth loading feedback
+  useEffect(() => {
+    setIsSearching(true);
+    setSearchError('');
+    const timer = setTimeout(() => {
+      setIsSearching(false);
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [sourceQuery, destinationQuery, placeQuery, selectedStyle]);
+
+  // Filtered trips logic
+  const filteredTrips = useMemo(() => {
+    try {
+      const src = sourceQuery.trim().toLowerCase();
+      const dest = destinationQuery.trim().toLowerCase();
+      const place = placeQuery.trim().toLowerCase();
+
+      return trips.filter(t => {
+        const styleOk = selectedStyle === 'all' || t.travelStyle === selectedStyle;
+
+        // Source matching
+        const sourceOk = !src || (t.origin || '').toLowerCase().includes(src);
+
+        // Destination matching
+        const destOk = !dest || (t.destination || '').toLowerCase().includes(dest);
+
+        // Places / spots along the way matching
+        const placeOk = !place ||
+          (t.spotsToVisit || []).some(sp => sp.toLowerCase().includes(place)) ||
+          (t.itinerary || []).some(w => w.locationName?.toLowerCase().includes(place) || w.title?.toLowerCase().includes(place)) ||
+          t.title.toLowerCase().includes(place) ||
+          t.destination.toLowerCase().includes(place);
+
+        return styleOk && sourceOk && destOk && placeOk;
+      });
+    } catch (err: any) {
+      setSearchError('Error applying search filter. Please check your query.');
+      return trips;
+    }
+  }, [trips, sourceQuery, destinationQuery, placeQuery, selectedStyle]);
 
   // Helper: resolve organiser display name from allUsers
   const organiserName = (trip: Trip) => {
     const u = allUsers.find(u => u.id === trip.ownerId);
-    return u?.displayName || trip.ownerName || 'Unknown';
+    return u?.displayName || trip.ownerName || 'Host';
+  };
+
+  const organiserProfile = (trip: Trip) => {
+    return allUsers.find(u => u.id === trip.ownerId);
   };
 
   // Format hosted date
@@ -50,25 +104,58 @@ export const HomePage: React.FC<HomePageProps> = ({
     catch { return trip.startDate; }
   };
 
-  // Request to join
+  const clearAllFilters = () => {
+    setSourceQuery('');
+    setDestinationQuery('');
+    setPlaceQuery('');
+    setSelectedStyle('all');
+    setSearchError('');
+  };
+
+  const hasActiveFilters = !!(sourceQuery || destinationQuery || placeQuery || selectedStyle !== 'all');
+
+  // Request to join with capacity & duplicate prevention
   const handleRequestJoin = async (trip: Trip) => {
     if (!isLoggedIn) { onGoToLogin(); return; }
     if (trip.memberIds.includes(currentUser.id)) return;
     if (joinState[trip.id] === 'sent' || joinState[trip.id] === 'sending') return;
 
+    const availableSeats = trip.totalSeats != null
+      ? Math.max(0, trip.totalSeats - trip.memberIds.length)
+      : null;
+    if (availableSeats === 0) {
+      setJoinError(prev => ({ ...prev, [trip.id]: 'All seats are filled.' }));
+      return;
+    }
+
     setJoinState(s => ({ ...s, [trip.id]: 'sending' }));
-    await sendCompanionRequestApi({
+    setJoinError(prev => ({ ...prev, [trip.id]: '' }));
+
+    const res = await sendCompanionRequestApi({
       tripId:            trip.id,
       tripTitle:         trip.title,
       requesterId:       currentUser.id,
       requesterName:     currentUser.displayName,
       requesterAvatar:   currentUser.photoURL,
-      targetUserId:      trip.ownerId,   // request goes TO the trip owner
+      targetUserId:      trip.ownerId,
       tripOwnerId:       trip.ownerId,
-      message:           `Hi! I would love to join your trip to ${trip.destination}. Please consider my request.`,
-      compatibilityScore: 80,
+      message:           `Hi ${trip.ownerName}! I would love to join your journey to ${trip.destination}. Please consider my request.`,
+      compatibilityScore: 82,
+      requesterProfile: {
+        bio: currentUser.bio,
+        travelStyle: currentUser.travelStyle,
+        verificationStatus: currentUser.verificationStatus,
+        rating: currentUser.rating,
+        tripsCount: currentUser.tripsCount,
+      }
     });
-    setJoinState(s => ({ ...s, [trip.id]: 'sent' }));
+
+    if (res.success) {
+      setJoinState(s => ({ ...s, [trip.id]: 'sent' }));
+    } else {
+      setJoinState(s => ({ ...s, [trip.id]: 'idle' }));
+      setJoinError(prev => ({ ...prev, [trip.id]: res.error || 'Failed to send request.' }));
+    }
   };
 
   return (
@@ -144,20 +231,27 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </div>
 
-      {/* ── SEARCH BAR (single combined location search) ─────── */}
+      {/* ── ENHANCED SEARCH PLACES SECTION (Source, Destination, Places) ── */}
       <div className="max-w-7xl mx-auto px-4 mt-10">
-        <div className="bg-white rounded-3xl border border-orange-100 p-6 shadow-sm space-y-4">
+        <div className="bg-white rounded-3xl border border-orange-100 p-6 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-orange-600 mb-1">Find Your Ride</p>
-              <h3 className="text-lg font-extrabold text-gray-900">Search trips by location</h3>
+              <p className="text-xs font-bold uppercase tracking-wider text-orange-600 mb-1 flex items-center gap-1.5">
+                <Navigation className="w-3.5 h-3.5" />
+                Find Your Ride &amp; Explore Routes
+              </p>
+              <h3 className="text-xl font-extrabold text-gray-900">Search by Source, Destination &amp; Places</h3>
             </div>
-            <div className="flex items-center gap-1.5 bg-orange-50 p-1 rounded-xl text-xs overflow-x-auto">
+            
+            {/* Travel Style Chips */}
+            <div className="flex items-center gap-1.5 bg-orange-50 p-1 rounded-xl text-xs overflow-x-auto scrollbar-none">
               {['all','adventure','cultural','relaxed','budget'].map(style => (
                 <button
                   key={style}
                   onClick={() => setSelectedStyle(style)}
-                  className={`px-3 py-1 font-medium rounded-lg capitalize transition-colors whitespace-nowrap ${selectedStyle === style ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-600 hover:text-orange-700'}`}
+                  className={`px-3 py-1 font-medium rounded-lg capitalize transition-colors whitespace-nowrap ${
+                    selectedStyle === style ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-600 hover:text-orange-700'
+                  }`}
                 >
                   {style}
                 </button>
@@ -165,56 +259,138 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
           </div>
 
-          {/* Single search input */}
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="w-5 h-5 text-orange-400 absolute left-4 top-1/2 -translate-y-1/2" />
+          {/* Error Banner */}
+          {searchError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {searchError}
+              </span>
+              <button onClick={() => setSearchError('')} className="text-rose-500 hover:text-rose-700">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Three Dedicated Search Fields: Source, Destination, Places */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* 1. Source (Origin) */}
+            <div className="relative">
+              <MapPin className="w-4 h-4 text-emerald-600 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search by city, destination or trip name (e.g. Bengaluru, Coorg, Leh...)"
-                value={locationQuery}
-                onChange={e => setLocationQuery(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 text-sm bg-orange-50 border border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-400 font-medium text-gray-900"
+                placeholder="From / Source (e.g. Bengaluru, Delhi)..."
+                value={sourceQuery}
+                onChange={e => setSourceQuery(e.target.value)}
+                className="w-full pl-10 pr-8 py-3 text-xs sm:text-sm bg-orange-50/60 border border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-400 font-medium text-gray-900 placeholder:text-slate-400"
               />
-              {locationQuery && (
+              {sourceQuery && (
                 <button
-                  onClick={() => setLocationQuery('')}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg"
+                  onClick={() => setSourceQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base"
                 >×</button>
               )}
             </div>
-            {locationQuery && (
-              <button
-                onClick={() => { setLocationQuery(''); setSelectedStyle('all'); }}
-                className="px-4 py-3 bg-orange-100 hover:bg-orange-200 text-orange-800 text-sm font-semibold rounded-2xl transition-colors"
-              >
-                Clear
-              </button>
-            )}
+
+            {/* 2. Destination */}
+            <div className="relative">
+              <Compass className="w-4 h-4 text-orange-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="To / Destination (e.g. Coorg, Leh, Goa)..."
+                value={destinationQuery}
+                onChange={e => setDestinationQuery(e.target.value)}
+                className="w-full pl-10 pr-8 py-3 text-xs sm:text-sm bg-orange-50/60 border border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-400 font-medium text-gray-900 placeholder:text-slate-400"
+              />
+              {destinationQuery && (
+                <button
+                  onClick={() => setDestinationQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base"
+                >×</button>
+              )}
+            </div>
+
+            {/* 3. Places / Waypoints / Attractions */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-purple-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Places / Stops (e.g. Abbi Falls, Rohtang)..."
+                value={placeQuery}
+                onChange={e => setPlaceQuery(e.target.value)}
+                className="w-full pl-10 pr-8 py-3 text-xs sm:text-sm bg-orange-50/60 border border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-400 font-medium text-gray-900 placeholder:text-slate-400"
+              />
+              {placeQuery && (
+                <button
+                  onClick={() => setPlaceQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base"
+                >×</button>
+              )}
+            </div>
           </div>
 
-          {locationQuery && (
-            <p className="text-xs text-slate-500">
-              Showing <strong>{filteredTrips.length}</strong> trip{filteredTrips.length !== 1 ? 's' : ''} matching "{locationQuery}"
-            </p>
+          {/* Popular places quick chips */}
+          {popularPlaces.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap pt-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-orange-400" />
+                Popular:
+              </span>
+              {popularPlaces.map(place => (
+                <button
+                  key={place}
+                  type="button"
+                  onClick={() => {
+                    setDestinationQuery(place);
+                  }}
+                  className="text-xs bg-slate-100 hover:bg-orange-100 hover:text-orange-800 text-slate-600 px-2.5 py-1 rounded-lg transition-colors font-medium"
+                >
+                  {place}
+                </button>
+              ))}
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  className="text-xs text-rose-600 hover:text-rose-800 font-bold ml-auto"
+                >
+                  Reset Filters
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Active Search Summary */}
+          {hasActiveFilters && (
+            <div className="text-xs text-slate-500 flex items-center gap-2">
+              {isSearching ? (
+                <span className="flex items-center gap-1.5 text-orange-600 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Updating matching trips…
+                </span>
+              ) : (
+                <span>
+                  Found <strong>{filteredTrips.length}</strong> trip{filteredTrips.length !== 1 ? 's' : ''} matching criteria.
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>
 
-      {/* ── AVAILABLE TRIPS ──────────────────────────────────── */}
+      {/* ── AVAILABLE TRIPS GRID ──────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-4 mt-8 space-y-5">
         <div className="flex items-end justify-between flex-wrap gap-4">
           <div>
             <h2 className="text-2xl font-extrabold tracking-tight text-gray-900">
-              Available Trips ({filteredTrips.length})
+              Matching Trips ({filteredTrips.length})
             </h2>
             <p className="text-xs text-slate-500 mt-1">
               {isLoggedIn
-                ? 'Request to join a trip — the host will be notified and can accept you'
-                : 'Sign in to request joining a trip'}
+                ? 'Request to join any trip below. Once the host accepts, you will be confirmed into the journey.'
+                : 'Sign in to send join requests to trip hosts.'}
             </p>
           </div>
-          {/* Create Trip button — ONLY logged-in users */}
           {isLoggedIn && (
             <button
               onClick={onHostTrip}
@@ -225,41 +401,74 @@ export const HomePage: React.FC<HomePageProps> = ({
           )}
         </div>
 
-        {filteredTrips.length === 0 ? (
-          <div className="p-12 text-center bg-white rounded-3xl border border-orange-100">
-            <Search className="w-8 h-8 text-orange-200 mx-auto mb-3" />
-            <div className="text-sm font-bold text-gray-800">No matching trips found</div>
-            <p className="text-xs text-slate-500 mt-1 mb-4">
-              {isLoggedIn ? 'Be the first to host a trip on this route!' : 'Sign in to create a trip.'}
-            </p>
-            {isLoggedIn ? (
-              <button
-                onClick={onHostTrip}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-xs font-bold shadow-sm"
-              >
-                <Plus className="w-3.5 h-3.5" /> Host this Route
-              </button>
-            ) : (
-              <button
-                onClick={onGoToLogin}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm"
-              >
-                Sign In to Get Started
-              </button>
-            )}
+        {/* LOADING STATE */}
+        {isSearching ? (
+          <div className="p-16 text-center bg-white rounded-3xl border border-orange-100 space-y-3">
+            <Loader2 className="w-8 h-8 text-orange-500 animate-spin mx-auto" />
+            <p className="text-sm font-semibold text-slate-700">Searching routes &amp; destinations…</p>
+            <p className="text-xs text-slate-400">Filtering trip origins, stops, and waypoints</p>
+          </div>
+        ) : filteredTrips.length === 0 ? (
+          /* EMPTY RESULT STATE */
+          <div className="p-12 text-center bg-white rounded-3xl border border-orange-100 space-y-4">
+            <div className="w-14 h-14 rounded-full bg-orange-50 text-orange-400 flex items-center justify-center mx-auto">
+              <Search className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">No matching trips found</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                No trips currently match your search criteria {sourceQuery ? `from "${sourceQuery}"` : ''} {destinationQuery ? `to "${destinationQuery}"` : ''} {placeQuery ? `near "${placeQuery}"` : ''}.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-3 pt-2">
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Clear All Filters
+                </button>
+              )}
+              {isLoggedIn ? (
+                <button
+                  type="button"
+                  onClick={onHostTrip}
+                  className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Host this Route
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onGoToLogin}
+                  className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+                >
+                  Sign In to Host this Trip
+                </button>
+              )}
+            </div>
           </div>
         ) : (
+          /* TRIPS GRID */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredTrips.map(trip => {
-              const isMember    = trip.memberIds.includes(currentUser.id);
-              const isOwner     = trip.ownerId === currentUser.id;
-              const reqStatus   = joinState[trip.id] || 'idle';
+              const isMember = trip.memberIds.includes(currentUser.id);
+              const isOwner = trip.ownerId === currentUser.id;
+              const reqStatus = joinState[trip.id] || 'idle';
+              const reqErr = joinError[trip.id];
+
+              const availableSeats = trip.totalSeats != null
+                ? Math.max(0, trip.totalSeats - trip.memberIds.length)
+                : null;
+              const isFull = availableSeats !== null && availableSeats <= 0;
+              const hostUser = organiserProfile(trip);
 
               return (
-                <div key={trip.id} className="trip-card rounded-2xl overflow-hidden flex flex-col justify-between group">
+                <div key={trip.id} className="trip-card rounded-2xl overflow-hidden flex flex-col justify-between group bg-white border border-orange-100 shadow-sm hover:shadow-md transition-all">
                   <div>
                     {/* Cover image */}
-                    <div className="relative aspect-[16/9] bg-orange-50 overflow-hidden">
+                    <div className="relative aspect-[16/9] bg-orange-50 overflow-hidden cursor-pointer" onClick={() => onViewTripDetail(trip)}>
                       <img
                         src={trip.coverImage || '/src/assets/images/hero_travel_journey_1791735781773.jpg'}
                         alt={trip.title}
@@ -268,105 +477,148 @@ export const HomePage: React.FC<HomePageProps> = ({
                       <div className="absolute top-2.5 right-2.5 bg-gray-900/80 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg capitalize">
                         {trip.travelStyle}
                       </div>
-                      <div className="absolute bottom-2.5 left-2.5">
+                      <div className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5">
                         <span className="text-xs bg-gradient-to-r from-orange-500 to-rose-500 text-white px-2 py-0.5 rounded font-semibold uppercase">
                           {trip.status}
                         </span>
+                        {trip.vehicle && (
+                          <span className="text-xs bg-gray-900/80 text-white px-2 py-0.5 rounded font-semibold flex items-center gap-1">
+                            <Car className="w-3 h-3 text-orange-400" />
+                            {trip.vehicle}
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    <div className="p-4">
-                      <h3 className="font-bold text-gray-900 text-base mb-2 leading-snug">{trip.title}</h3>
+                    <div className="p-4 space-y-2.5">
+                      <h3
+                        onClick={() => onViewTripDetail(trip)}
+                        className="font-bold text-gray-900 text-base leading-snug cursor-pointer hover:text-orange-600 transition-colors"
+                      >
+                        {trip.title}
+                      </h3>
 
-                      {/* Location + date */}
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mb-2">
-                        <span className="flex items-center gap-1 text-gray-700 font-medium">
-                          <MapPin className="w-3.5 h-3.5 text-orange-500" />
-                          {trip.origin} → {trip.destination}
-                        </span>
+                      {/* Route (Origin → Destination) */}
+                      <div className="flex items-center gap-1.5 text-xs text-gray-800 font-semibold">
+                        <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                        <span className="truncate max-w-[120px]">{trip.origin}</span>
+                        <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span className="text-orange-600 truncate max-w-[140px]">{trip.destination}</span>
+                      </div>
+
+                      {/* Date / Seats left / Cost per seat */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-slate-400" />
                           {trip.startDate}
                         </span>
+                        {trip.totalSeats != null && (
+                          <span className={`flex items-center gap-1 font-bold ${isFull ? 'text-red-500' : 'text-emerald-600'}`}>
+                            <Users className="w-3.5 h-3.5" />
+                            {isFull ? 'Seats Full' : `${availableSeats} seats left`}
+                          </span>
+                        )}
+                        {trip.costPerPerson && (
+                          <span className="font-bold text-orange-600 flex items-center gap-0.5">
+                            <IndianRupee className="w-3 h-3" />₹{trip.costPerPerson.toLocaleString('en-IN')}/seat
+                          </span>
+                        )}
                       </div>
 
-                      {/* Organiser + hosted date */}
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mb-3">
-                        <span className="flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-orange-400" />
-                          <span className="font-semibold text-orange-700">{organiserName(trip)}</span>
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          Posted {hostedAt(trip)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Users className="w-3.5 h-3.5 text-slate-400" />
-                          {trip.totalSeats
-                            ? `${Math.max(0, trip.totalSeats - trip.memberIds.length)} / ${trip.totalSeats} seats`
-                            : `${trip.memberIds.length} joined`}
-                        </span>
+                      {/* Host information */}
+                      <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100">
+                        <div className="flex items-center gap-1.5">
+                          <img
+                            src={hostUser?.photoURL || '/src/assets/images/avatar_traveler_alex_1791735824369.jpg'}
+                            alt=""
+                            className="w-5 h-5 rounded-full object-cover border border-orange-200"
+                            referrerPolicy="no-referrer"
+                          />
+                          <span className="font-semibold text-slate-800">{organiserName(trip)}</span>
+                          {hostUser?.verificationStatus === 'verified' && (
+                            <span title="Verified Host">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400">Posted {hostedAt(trip)}</span>
                       </div>
 
                       {/* Spots */}
-                      <div className="flex flex-wrap gap-1.5">
-                        {trip.spotsToVisit.slice(0, 3).map((sp, i) => (
-                          <span key={i} className="text-[11px] bg-orange-50 text-orange-800 border border-orange-100 px-2 py-0.5 rounded-md font-medium">
-                            {sp}
-                          </span>
-                        ))}
-                        {trip.spotsToVisit.length > 3 && (
-                          <span className="text-[11px] text-slate-400">+{trip.spotsToVisit.length - 3} more</span>
-                        )}
-                      </div>
+                      {trip.spotsToVisit.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {trip.spotsToVisit.slice(0, 3).map((sp, i) => (
+                            <span key={i} className="text-[10px] bg-orange-50 text-orange-800 border border-orange-100 px-2 py-0.5 rounded font-medium">
+                              {sp}
+                            </span>
+                          ))}
+                          {trip.spotsToVisit.length > 3 && (
+                            <span className="text-[10px] text-slate-400">+{trip.spotsToVisit.length - 3}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Join error if any */}
+                      {reqErr && (
+                        <p className="text-[11px] text-rose-600 font-medium">{reqErr}</p>
+                      )}
                     </div>
                   </div>
 
-                  {/* Footer */}
+                  {/* Card Footer with Details and Action */}
                   <div className="px-4 pb-4 border-t border-orange-50 flex items-center justify-between pt-3">
                     <div>
-                      <div className="text-[11px] text-slate-400">Budget</div>
+                      <div className="text-[10px] uppercase font-bold text-slate-400">Total Budget</div>
                       <div className="text-sm font-bold font-mono text-gray-900 tabular-nums flex items-center gap-0.5">
                         <IndianRupee className="w-3.5 h-3.5 text-orange-500" />
                         {trip.budget.toLocaleString('en-IN')}
                       </div>
                     </div>
 
-                    {/* Action button */}
-                    {isOwner ? (
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => onOpenTrip(trip.id)}
-                        className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                        type="button"
+                        onClick={() => onViewTripDetail(trip)}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
                       >
-                        Manage Trip <ArrowRight className="w-3.5 h-3.5" />
+                        Details
                       </button>
-                    ) : isMember ? (
-                      <div className="flex items-center gap-1.5 px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Joined
-                      </div>
-                    ) : reqStatus === 'sent' ? (
-                      <div className="flex items-center gap-1.5 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-xs font-semibold">
-                        <Clock className="w-3.5 h-3.5" /> Request Sent
-                      </div>
-                    ) : reqStatus === 'sending' ? (
-                      <div className="flex items-center gap-1.5 px-4 py-2 bg-orange-50 border border-orange-200 text-orange-600 rounded-xl text-xs font-semibold">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending…
-                      </div>
-                    ) : !isLoggedIn ? (
-                      <button
-                        onClick={onGoToLogin}
-                        className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-                      >
-                        Sign In to Join
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleRequestJoin(trip)}
-                        className="px-4 py-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-                      >
-                        <UserCheck className="w-3.5 h-3.5" /> Request to Join
-                      </button>
-                    )}
+
+                      {isOwner ? (
+                        <button
+                          onClick={() => onOpenTrip(trip.id)}
+                          className="px-3.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+                        >
+                          Manage <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : isMember ? (
+                        <div className="flex items-center gap-1 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Joined
+                        </div>
+                      ) : reqStatus === 'sent' ? (
+                        <div className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-xs font-semibold">
+                          <Clock className="w-3.5 h-3.5" /> Sent
+                        </div>
+                      ) : isFull ? (
+                        <span className="text-xs font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-xl border border-red-200">
+                          Full
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRequestJoin(trip)}
+                          disabled={reqStatus === 'sending'}
+                          className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 disabled:opacity-60 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+                        >
+                          {reqStatus === 'sending' ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <UserCheck className="w-3.5 h-3.5" />
+                          )}
+                          <span>Join</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

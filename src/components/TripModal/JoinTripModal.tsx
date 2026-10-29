@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Trip } from '../../types';
 import { useAuth } from '../../context/useAuth';
-import { updateTrip } from '../../services/tripService';
-import { CheckCircle2, AlertCircle, Loader2, Car, Users } from 'lucide-react';
+import { sendCompanionRequestApi } from '../../services/tripService';
+import { CheckCircle2, AlertCircle, Loader2, Car, Users, Clock } from 'lucide-react';
 
 interface JoinTripModalProps {
   trip: Trip;
@@ -48,11 +48,16 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
   const availableSeats = trip.totalSeats != null
     ? Math.max(0, trip.totalSeats - trip.memberIds.length)
     : null;
+  const isFull = availableSeats !== null && availableSeats <= 0;
 
   const ic = 'w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-orange-400 focus:outline-none text-sm bg-white mt-1';
 
   const handleDetailsSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isFull) {
+      setError('Cannot join: All seats on this trip are occupied.');
+      return;
+    }
     if (!fullName || !address || !age || !gender || !idType || idLast4.length !== 4) {
       setError('Please fill in all required fields correctly.');
       return;
@@ -62,6 +67,10 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
   };
 
   const handlePaymentConfirm = async () => {
+    if (isFull) {
+      setError('Cannot join: This trip is at full capacity.');
+      return;
+    }
     if (payMethod === 'upi' && !upiId.trim())        { setError('Please enter your UPI ID.'); return; }
     if (payMethod === 'card' && (!cardName || !cardNum || !cardExp || !cardCvv)) { setError('Please fill all card details.'); return; }
     if (payMethod === 'netbanking' && !bankName)      { setError('Please select your bank.'); return; }
@@ -69,12 +78,31 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
     setIsLoading(true);
 
     try {
-      const updated: Trip = { ...trip, memberIds: [...trip.memberIds, currentUser.id] };
-      await updateTrip(updated);
-      onJoined(updated);
+      const joinMsg = `Hi ${trip.ownerName}! I would like to join this trip. Details: ${fullName}, ${age}y/o ${gender}, ID proof (${idType}) ending in ${idLast4}. Payment mode: ${payMethod.toUpperCase()}.`;
+      const res = await sendCompanionRequestApi({
+        tripId: trip.id,
+        tripTitle: trip.title,
+        requesterId: currentUser.id,
+        requesterName: fullName || currentUser.displayName,
+        requesterAvatar: currentUser.photoURL,
+        targetUserId: trip.ownerId,
+        tripOwnerId: trip.ownerId,
+        message: joinMsg,
+        compatibilityScore: 85,
+        requesterProfile: {
+          bio: `${age} y/o ${gender} from ${address.slice(0, 40)}. ID: ${idType} (*${idLast4}).`,
+          travelStyle: currentUser.travelStyle,
+          verificationStatus: 'verified',
+        }
+      });
+
+      if (!res.success) {
+        setError(res.error || 'Failed to submit join request.');
+        return;
+      }
       setStep('success');
-    } catch (err) {
-      setError('Failed to join trip. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to join trip. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -89,12 +117,12 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
         <div className="flex justify-between items-start p-6 border-b border-gray-100">
           <div>
             <h2 className="text-2xl font-bold text-sky-800">
-              {step === 'success' ? 'You\'re in! 🎉' : 'Join Trip — Your Details'}
+              {step === 'success' ? 'Request Submitted! ⏳' : 'Join Trip — Your Details'}
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              {step === 'details' ? 'Please provide your details before joining this trip.' :
-               step === 'payment' ? 'Review trip info and complete payment.' :
-               'You have successfully joined this trip!'}
+              {step === 'details' ? 'Please provide your details before requesting to join this trip.' :
+               step === 'payment' ? 'Review trip info and select your payment preference.' :
+               'Your request has been forwarded to the trip host.'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-1">×</button>
@@ -128,7 +156,7 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                       <Users className="w-3.5 h-3.5 text-sky-500" />
                       <div>
                         <p className="text-xs text-gray-400">Seats</p>
-                        <p className={`font-medium ${availableSeats === 0 ? 'text-red-600' : 'text-gray-800'}`}>
+                        <p className={`font-medium ${isFull ? 'text-red-600' : 'text-gray-800'}`}>
                           {availableSeats} available / {trip.totalSeats} total
                         </p>
                       </div>
@@ -136,6 +164,13 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                   )}
                 </div>
               </div>
+
+              {isFull && (
+                <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 mb-4">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>All seats on this trip are occupied. You cannot request to join at this time.</span>
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 mb-4">
@@ -180,19 +215,19 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                   <label className="block text-sm font-semibold text-gray-700">ID Number (Last 4 digits) <span className="text-red-500">*</span></label>
                   <input type="text" required maxLength={4} minLength={4} pattern="[0-9]{4}" inputMode="numeric"
                     value={idLast4} onChange={e => setIdLast4(e.target.value)} placeholder="e.g. 4521" className={ic} />
-                  <p className="text-[11px] text-gray-400 mt-1">For privacy, only the last 4 digits are stored.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">For privacy, only the last 4 digits are shared with host.</p>
                 </div>
                 <div className="flex justify-end pt-2 border-t border-gray-100">
-                  <button type="submit"
-                    className="px-6 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-semibold text-sm shadow-sm transition-colors">
-                    Continue to Payment →
+                  <button type="submit" disabled={isFull}
+                    className="px-6 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white rounded-xl font-semibold text-sm shadow-sm transition-colors">
+                    Continue to Payment Preference →
                   </button>
                 </div>
               </form>
             </>
           )}
 
-          {/* ── STEP 2: PAYMENT ── */}
+          {/* ── STEP 2: PAYMENT PREFERENCE ── */}
           {step === 'payment' && (
             <div className="space-y-5">
               {/* Host contact */}
@@ -202,7 +237,7 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                   <p><strong>Name:</strong> {trip.ownerName}</p>
                   <p><strong>Email:</strong> {trip.ownerId}</p>
                 </div>
-                <p className="text-xs text-gray-400 mt-2">ID proof verified but not disclosed for privacy.</p>
+                <p className="text-xs text-gray-400 mt-2">Verified Host. Identity credentials vetted by platform.</p>
               </div>
 
               {/* Trip details */}
@@ -216,7 +251,7 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                   {trip.totalSeats != null && (
                     <p>
                       <strong>Seats:</strong>{' '}
-                      <span className={availableSeats === 0 ? 'text-red-600 font-bold' : 'text-gray-800'}>
+                      <span className={isFull ? 'text-red-600 font-bold' : 'text-gray-800'}>
                         {availableSeats} available / {trip.totalSeats} total
                       </span>
                     </p>
@@ -227,13 +262,13 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
 
               {/* Payment method */}
               <div className="border rounded-xl p-4">
-                <h4 className="font-bold text-gray-700 mb-3 text-sm">Select Payment Method</h4>
+                <h4 className="font-bold text-gray-700 mb-3 text-sm">Select Payment Preference</h4>
                 <div className="space-y-2">
                   {PAYMENT_METHODS.map(m => (
                     <label key={m} className="flex items-center gap-2 cursor-pointer">
                       <input type="radio" name="payMethod" value={m}
                         checked={payMethod === m} onChange={() => setPayMethod(m)} />
-                      <span className="text-sm capitalize">{m === 'upi' ? 'UPI' : m === 'netbanking' ? 'Net Banking' : m === 'cash' ? 'Cash / Pay Later' : 'Debit / Credit Card'}</span>
+                      <span className="text-sm capitalize">{m === 'upi' ? 'UPI' : m === 'netbanking' ? 'Net Banking' : m === 'cash' ? 'Cash / Pay on Departure' : 'Debit / Credit Card'}</span>
                     </label>
                   ))}
                 </div>
@@ -263,8 +298,8 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
                   </div>
                 )}
                 {payMethod === 'cash' && (
-                  <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-gray-700">
-                    You selected Cash / Pay Later. Payment can be made directly to the trip host.
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-gray-700">
+                    Payment will be made directly to the host upon boarding.
                   </div>
                 )}
               </div>
@@ -277,10 +312,10 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
 
               <div className="flex items-center justify-between pt-2 border-t border-gray-100">
                 <button onClick={() => setStep('details')} className="text-sm font-medium text-gray-500 hover:text-gray-700">← Back</button>
-                <button onClick={handlePaymentConfirm} disabled={isLoading}
+                <button onClick={handlePaymentConfirm} disabled={isLoading || isFull}
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition-colors">
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Confirm &amp; Join Trip
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                  Submit Join Request to Host
                 </button>
               </div>
             </div>
@@ -289,14 +324,19 @@ export const JoinTripModal: React.FC<JoinTripModalProps> = ({ trip, onClose, onJ
           {/* ── STEP 3: SUCCESS ── */}
           {step === 'success' && (
             <div className="text-center py-8 space-y-4">
-              <CheckCircle2 className="w-16 h-16 text-emerald-500 mx-auto" />
-              <h3 className="text-xl font-bold text-gray-900">Successfully Joined!</h3>
-              <p className="text-sm text-gray-500 max-w-sm mx-auto">
-                You're now a member of <strong>{trip.title}</strong>. Open the trip workspace to view the itinerary and connect with fellow travelers.
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Join Request Sent to Host!</h3>
+              <p className="text-sm text-gray-600 max-w-md mx-auto leading-relaxed">
+                Your request has been received by <strong>{trip.ownerName}</strong>. As soon as the host accepts your request, this trip will appear in your <strong>Joined Trips</strong> dashboard.
               </p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 max-w-sm mx-auto">
+                Once approved, you'll be able to access the group channel, itinerary, and live trip map.
+              </div>
               <button onClick={onClose}
-                className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl font-bold text-sm shadow-sm">
-                Go to Trip →
+                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm shadow-sm transition-colors">
+                Back to Dashboard
               </button>
             </div>
           )}

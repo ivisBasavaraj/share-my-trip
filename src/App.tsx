@@ -11,6 +11,7 @@ import {
   subscribeToTrips, subscribeToItinerary,
   getLocalTrips, saveLocalTrips,
   sendCompanionRequestApi,
+  subscribeToCompanionRequests,
 } from './services/tripService';
 import { testConnection } from './firebase';
 import { Header } from './components/Header';
@@ -32,11 +33,13 @@ import { PackingChecklist } from './components/Packing/PackingChecklist';
 import { TripWeatherWidget } from './components/Weather/TripWeatherWidget';
 import { TripExportModal } from './components/Export/TripExportModal';
 import { EditTripModal } from './components/TripModal/EditTripModal';
+import { SosAlertModal } from './components/Safety/SosAlertModal';
+import { HelpSupportModal } from './components/Support/HelpSupportModal';
 import {
   Calendar, MapPin, IndianRupee, Sparkles, Navigation,
   ChevronDown, ArrowRight, ArrowLeft, MessageSquare, Package,
   CloudSun, Share2, Edit3, Users, Plus, Copy, CheckCircle2,
-  UserCheck, Clock, Car, Info,
+  UserCheck, Clock, Car, Info, X, Siren, LifeBuoy,
 } from 'lucide-react';
 
 type AppView = 'home' | 'workspace' | 'login' | 'register';
@@ -65,6 +68,38 @@ function MainApp() {
   const [showServicesModal,   setShowServicesModal]   = useState(false);
   const [showExportModal,     setShowExportModal]     = useState(false);
   const [showWeatherDrawer,   setShowWeatherDrawer]   = useState(false);
+  const [showSosModal,         setShowSosModal]         = useState(false);
+  const [showHelpSupportModal, setShowHelpSupportModal] = useState(false);
+
+  // Accepted Join Request notifications for the traveler (Requirement 5)
+  interface AcceptedJoinNotification {
+    id: string;
+    tripId: string;
+    tripTitle?: string;
+  }
+  const [acceptedNotifications, setAcceptedNotifications] = useState<AcceptedJoinNotification[]>([]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const unsub = subscribeToCompanionRequests({ requesterId: currentUser.id }, requests => {
+      try {
+        const storedAcks: string[] = JSON.parse(localStorage.getItem('srsplatform_ack_accepted_reqs') || '[]');
+        const newAccepted = requests
+          .filter(r => r.status === 'accepted' && !storedAcks.includes(r.id))
+          .map(r => ({ id: r.id, tripId: r.tripId, tripTitle: r.tripTitle }));
+        setAcceptedNotifications(newAccepted);
+      } catch { /* ignore */ }
+    });
+    return () => unsub();
+  }, [currentUser?.id]);
+
+  const dismissAcceptedNotif = (reqId: string) => {
+    try {
+      const storedAcks: string[] = JSON.parse(localStorage.getItem('srsplatform_ack_accepted_reqs') || '[]');
+      localStorage.setItem('srsplatform_ack_accepted_reqs', JSON.stringify([...storedAcks, reqId]));
+    } catch { /* ignore */ }
+    setAcceptedNotifications(prev => prev.filter(n => n.id !== reqId));
+  };
 
   useEffect(() => { testConnection(); }, []);
 
@@ -142,7 +177,43 @@ function MainApp() {
         onOpenRegister={() => setCurrentView('register')}
         onOpenServicesModal={() => setShowServicesModal(true)}
         onOpenExportModal={() => setShowExportModal(true)}
+        onOpenSosModal={() => setShowSosModal(true)}
+        onOpenHelpSupport={() => setShowHelpSupportModal(true)}
       />
+
+      {/* ── THANK-YOU ACCEPTANCE BANNER (Requirement 5) ── */}
+      {acceptedNotifications.map(notif => (
+        <div
+          key={notif.id}
+          className="bg-emerald-600 text-white px-4 py-3 shadow-md flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top duration-300"
+        >
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-bold">
+            <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+            <span>Your request has been accepted! You're now part of the trip{notif.tripTitle ? `: "${notif.tripTitle}"` : ''}.</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                setSelectedTripId(notif.tripId);
+                setCurrentView('workspace');
+                setDashTab('joined');
+                setActiveTab('itinerary');
+                dismissAcceptedNotif(notif.id);
+              }}
+              className="px-3.5 py-1.5 bg-white text-emerald-800 rounded-xl text-xs font-extrabold hover:bg-emerald-50 transition-colors shadow-xs"
+            >
+              View Joined Trip →
+            </button>
+            <button
+              onClick={() => dismissAcceptedNotif(notif.id)}
+              className="p-1 rounded-lg hover:bg-emerald-700 text-emerald-100 hover:text-white"
+              title="Dismiss notification"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ))}
 
       {/* ── HOME ─────────────────────────────────── */}
       {currentView === 'home' && (
@@ -294,8 +365,13 @@ function MainApp() {
                               <div className="absolute top-2.5 right-2.5 bg-gray-900/80 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg capitalize">
                                 {trip.travelStyle}
                               </div>
-                              <div className="absolute bottom-2.5 left-2.5 flex gap-1.5">
+                              <div className="absolute bottom-2.5 left-2.5 flex gap-1.5 flex-wrap">
                                 <span className="text-xs bg-gradient-to-r from-orange-500 to-rose-500 text-white px-2 py-0.5 rounded font-semibold uppercase">{trip.status}</span>
+                                {dashTab === 'joined' && (
+                                  <span className="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded font-semibold flex items-center gap-1 shadow-xs">
+                                    <CheckCircle2 className="w-3 h-3" /> Confirmed Member
+                                  </span>
+                                )}
                                 {trip.vehicle && (
                                   <span className="text-xs bg-gray-900/70 text-white px-2 py-0.5 rounded font-semibold flex items-center gap-1">
                                     <Car className="w-3 h-3" />{trip.vehicle}
@@ -492,8 +568,10 @@ function MainApp() {
 
       {/* ── MODALS ───────────────────────────────── */}
       <CreateTripModal isOpen={showCreateTripModal} onClose={() => setShowCreateTripModal(false)} onTripCreated={handleTripCreated} />
-      <SafetyModal     isOpen={showSafetyModal}     onClose={() => setShowSafetyModal(false)} />
+      <SafetyModal     isOpen={showSafetyModal}     onClose={() => setShowSafetyModal(false)} onTriggerSos={() => setShowSosModal(true)} />
       <ServicesModal   isOpen={showServicesModal}   onClose={() => setShowServicesModal(false)} />
+      <SosAlertModal   isOpen={showSosModal}        onClose={() => setShowSosModal(false)} activeTrip={activeTrip} />
+      <HelpSupportModal isOpen={showHelpSupportModal} onClose={() => setShowHelpSupportModal(false)} trips={trips} activeTripId={activeTrip?.id} />
       {activeTrip && <TripExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} trip={activeTrip} waypoints={waypoints} />}
       {activeTrip && <EditTripModal  isOpen={showEditTripModal} trip={activeTrip} onClose={() => setShowEditTripModal(false)} onTripUpdated={handleTripUpdated} onTripDeleted={handleTripDeleted} />}
       {/* TripDetailModal — full trip info + Request to Join */}
