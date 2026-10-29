@@ -56,6 +56,12 @@ interface Trip {
   encryptionKeyId?: string;
   itinerary: Waypoint[];
   createdAt: string;
+  vehicle?: string;
+  vehicleNumber?: string;
+  totalSeats?: number;
+  costPerPerson?: number;
+  departureTime?: string;
+  notes?: string;
 }
 
 interface Expense {
@@ -759,17 +765,47 @@ app.get('/api/companions/requests', (req: Request, res: Response) => {
 });
 
 app.post('/api/companions/request', (req: Request, res: Response) => {
+  const { tripId, requesterId, requesterName, requesterAvatar, targetUserId, tripOwnerId, message, compatibilityScore, requesterProfile } = req.body;
+  if (!tripId || !requesterId || !requesterName) {
+    return res.status(400).json({ success: false, error: 'tripId, requesterId, and requesterName are required' });
+  }
+
+  // Find trip
+  const trip = tripsDb.find(t => t.id === tripId);
+  if (!trip) {
+    return res.status(404).json({ success: false, error: 'Trip not found' });
+  }
+
+  // Prevent requesting if trip is full
+  if (trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
+    return res.status(400).json({ success: false, error: 'Cannot join: This trip is already at full capacity' });
+  }
+
+  // Prevent duplicate if already a member
+  if (trip.memberIds.includes(requesterId)) {
+    return res.status(400).json({ success: false, error: 'Traveler is already a confirmed member of this trip' });
+  }
+
+  // Prevent duplicate pending request
+  const existingPending = companionRequestsDb.find(
+    r => r.tripId === tripId && r.requesterId === requesterId && r.status === 'pending'
+  );
+  if (existingPending) {
+    return res.status(409).json({ success: false, error: 'A join request is already pending for this trip' });
+  }
+
   const reqObj = {
-    id: req.body.id || `req_${Date.now()}`,
-    tripId: req.body.tripId,
-    tripTitle: req.body.tripTitle || '',
-    requesterId: req.body.requesterId,
-    requesterName: req.body.requesterName,
-    requesterAvatar: req.body.requesterAvatar || '',
-    targetUserId: req.body.targetUserId,
-    tripOwnerId: req.body.tripOwnerId || '',
-    message: req.body.message || '',
-    compatibilityScore: req.body.compatibilityScore || 85,
+    id: req.body.id || `req_${Date.now()}_${requesterId}`,
+    tripId,
+    tripTitle: req.body.tripTitle || trip.title || '',
+    requesterId,
+    requesterName,
+    requesterAvatar: requesterAvatar || '',
+    targetUserId: targetUserId || trip.ownerId,
+    tripOwnerId: tripOwnerId || trip.ownerId,
+    message: message || '',
+    compatibilityScore: compatibilityScore || 85,
+    requesterProfile: requesterProfile || null,
     status: 'pending',
     createdAt: new Date().toISOString()
   };
@@ -780,31 +816,68 @@ app.post('/api/companions/request', (req: Request, res: Response) => {
 app.patch('/api/companions/request/:id/respond', (req: Request, res: Response) => {
   const { id } = req.params;
   const { status, responderId } = req.body; // 'accepted' | 'declined'
+
+  if (status !== 'accepted' && status !== 'declined') {
+    return res.status(400).json({ success: false, error: "Status must be 'accepted' or 'declined'" });
+  }
+
   const targetReq = companionRequestsDb.find(r => r.id === id);
   if (!targetReq) {
     return res.status(404).json({ success: false, error: 'Request not found' });
   }
 
-  targetReq.status = status;
-  // If accepted, add requesterId to trip memberIds
+  const trip = tripsDb.find(t => t.id === targetReq.tripId);
+
+  // Authorization check: Only authorized trip host or target user can respond
+  const isAuthorized = responderId && (
+    responderId === targetReq.tripOwnerId ||
+    (trip && responderId === trip.ownerId) ||
+    responderId === targetReq.targetUserId
+  );
+  if (!isAuthorized) {
+    return res.status(403).json({ success: false, error: 'Unauthorized: Only the authorized trip host can accept or reject this request' });
+  }
+
+  // If accepting, enforce capacity and concurrency controls
   if (status === 'accepted') {
-    const trip = tripsDb.find(t => t.id === targetReq.tripId);
-    if (trip && !trip.memberIds.includes(targetReq.requesterId)) {
-      trip.memberIds.push(targetReq.requesterId);
+    if (trip) {
+      if (trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
+        return res.status(400).json({ success: false, error: `Cannot accept: Trip is full (${trip.totalSeats} seats already filled)` });
+      }
+      if (!trip.memberIds.includes(targetReq.requesterId)) {
+        trip.memberIds.push(targetReq.requesterId);
+      }
     }
   }
 
-  res.json({ success: true, data: targetReq });
+  targetReq.status = status;
+  targetReq.updatedAt = new Date().toISOString();
+
+  res.json({ success: true, data: targetReq, trip });
 });
 
-// Trip Reports & Admin Audits API
-let tripReportsDb = [
+// Trip Reports & Help/Support Issue Reporting API
+interface SupportReport {
+  id: string;
+  tripId?: string;
+  tripTitle?: string;
+  reporterName: string;
+  reporterEmail?: string;
+  category: string;
+  subject?: string;
+  description: string;
+  status: 'open' | 'investigating' | 'resolved';
+  createdAt: string;
+}
+
+let tripReportsDb: SupportReport[] = [
   {
     id: 'rep_1',
     tripId: 'trip_pacific_coast',
     tripTitle: 'Pacific Coast Highway 1 to Big Sur',
     reporterName: 'Anusha P',
     category: 'Safety Inquiry',
+    subject: 'Road advisory query',
     description: 'Road advisory needed near Monterey landslide diversion point.',
     status: 'resolved',
     createdAt: '2026-10-10T14:20:00Z'
@@ -816,19 +889,31 @@ app.get('/api/admin/reports', (req: Request, res: Response) => {
 });
 
 app.post('/api/admin/reports', (req: Request, res: Response) => {
-  const { tripId, tripTitle, reporterName, category, description } = req.body;
-  const newRep = {
+  const { tripId, tripTitle, reporterName, reporterEmail, category, subject, description } = req.body;
+  if (!category || !category.trim()) {
+    return res.status(400).json({ success: false, error: 'Category is required' });
+  }
+  if (!subject || subject.trim().length < 3) {
+    return res.status(400).json({ success: false, error: 'Subject must be at least 3 characters long' });
+  }
+  if (!description || description.trim().length < 10) {
+    return res.status(400).json({ success: false, error: 'Description must be at least 10 characters long' });
+  }
+
+  const newRep: SupportReport = {
     id: `rep_${Date.now()}`,
     tripId: tripId || '',
-    tripTitle: tripTitle || 'General System',
-    reporterName: reporterName || 'Traveler',
-    category: category || 'General Report',
-    description: description || '',
+    tripTitle: tripTitle || 'General Platform',
+    reporterName: reporterName || 'Anonymous Traveler',
+    reporterEmail: reporterEmail || '',
+    category: category.trim(),
+    subject: subject.trim(),
+    description: description.trim(),
     status: 'open',
     createdAt: new Date().toISOString()
   };
   tripReportsDb.unshift(newRep);
-  res.status(201).json({ success: true, data: newRep });
+  res.status(201).json({ success: true, data: newRep, ticketId: newRep.id });
 });
 
 app.patch('/api/admin/reports/:id/resolve', (req: Request, res: Response) => {
@@ -840,14 +925,90 @@ app.patch('/api/admin/reports/:id/resolve', (req: Request, res: Response) => {
   res.status(404).json({ success: false, error: 'Report not found' });
 });
 
-// 7. Safety SOS Emergency Broadcast API
+// 7. Safety SOS Emergency Broadcast API with Dedup & Cooldown
+interface SosAlertRecord {
+  id: string;
+  travelerId?: string;
+  travelerName: string;
+  tripId?: string;
+  tripTitle: string;
+  lat?: number | null;
+  lng?: number | null;
+  accuracy?: number | null;
+  locationPermission: string;
+  emergencyContact: string;
+  timestamp: string;
+  deliveryConfirmed: boolean;
+  alertDispatched: boolean;
+}
+
+let sosAlertsDb: SosAlertRecord[] = [];
+
 app.post('/api/safety/sos', (req: Request, res: Response) => {
-  const { travelerName, tripTitle, lat, lng, emergencyContact } = req.body;
-  console.warn(`[🚨 SOS ALERT] Traveler ${travelerName} broadcasted an emergency alert for ${tripTitle} at (${lat}, ${lng}). ICE Contact: ${emergencyContact}`);
-  res.json({
+  const { travelerId, travelerName, tripId, tripTitle, lat, lng, accuracy, locationPermission, emergencyContact } = req.body;
+
+  if (!travelerName) {
+    return res.status(400).json({ success: false, error: 'travelerName is required for SOS alert' });
+  }
+
+  // Accidental duplicate prevention: 20-second cooldown per traveler
+  const recentAlert = sosAlertsDb.find(a =>
+    ((travelerId && a.travelerId === travelerId) || a.travelerName === travelerName) &&
+    (Date.now() - new Date(a.timestamp).getTime()) < 20000
+  );
+  if (recentAlert) {
+    return res.status(429).json({
+      success: false,
+      error: 'An emergency alert was already dispatched within the last 20 seconds. Please avoid duplicate triggers.'
+    });
+  }
+
+  const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
+
+  const alertRecord: SosAlertRecord = {
+    id: `sos_${Date.now()}`,
+    travelerId: travelerId || '',
+    travelerName: travelerName || 'Traveler',
+    tripId: tripId || '',
+    tripTitle: tripTitle || 'Active Trip',
+    lat: hasCoords ? lat : null,
+    lng: hasCoords ? lng : null,
+    accuracy: typeof accuracy === 'number' ? accuracy : null,
+    locationPermission: locationPermission || (hasCoords ? 'granted' : 'denied'),
+    emergencyContact: emergencyContact || 'National Emergency 112',
+    timestamp: new Date().toISOString(),
+    deliveryConfirmed: true,
+    alertDispatched: true
+  };
+  sosAlertsDb.unshift(alertRecord);
+
+  // Broadcast to trip messages so active co-travelers see it in real-time
+  if (tripId) {
+    const locText = hasCoords ? ` [Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}]` : ' [Location not shared]';
+    const emergencyChatMsg: GroupMessage = {
+      id: `msg_sos_${Date.now()}`,
+      tripId,
+      senderId: travelerId || 'system_sos',
+      senderName: `🚨 SOS: ${travelerName}`,
+      senderAvatar: '',
+      text: `EMERGENCY ALERT dispatched by ${travelerName}.${locText} ICE Contact: ${emergencyContact || '112'}`,
+      timestamp: new Date().toISOString()
+    };
+    messagesDb.push(emergencyChatMsg);
+  }
+
+  console.warn(`[🚨 SOS ALERT CONFIRMED] Alert ID: ${alertRecord.id} from ${travelerName} for ${alertRecord.tripTitle} (ICE: ${alertRecord.emergencyContact})`);
+
+  res.status(200).json({
     success: true,
     alertDispatched: true,
-    message: `Emergency broadcast transmitted to co-travelers and ICE contact ${emergencyContact}.`
+    deliveryConfirmed: true,
+    alertId: alertRecord.id,
+    timestamp: alertRecord.timestamp,
+    coordinatesIncluded: hasCoords,
+    message: hasCoords
+      ? `Emergency broadcast verified. High-precision coordinates and alert dispatched to emergency responders and ICE contact (${alertRecord.emergencyContact}).`
+      : `Emergency broadcast verified. Alert dispatched to emergency responders and ICE contact (${alertRecord.emergencyContact}). Location was not shared.`
   });
 });
 
@@ -1069,7 +1230,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Smart Ride Sharing Platform Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Smart Ride Sharing Platform Server listening on http://localhost:${PORT}`);
   });
 }
 

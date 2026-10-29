@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/useAuth';
-import { LogIn, LogOut, UserPlus, ShieldCheck, Plus } from 'lucide-react';
+import { LogIn, LogOut, UserPlus, ShieldCheck, Plus, Siren, LifeBuoy } from 'lucide-react';
 
 type AppView = 'home' | 'workspace' | 'login' | 'register';
 
@@ -15,6 +15,8 @@ interface HeaderProps {
   onOpenRegister?: () => void;
   onOpenServicesModal?: () => void;
   onOpenExportModal?: () => void;
+  onOpenSosModal?: () => void;
+  onOpenHelpSupport?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,6 +25,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateTrip,
   onOpenLogin,
   onOpenRegister,
+  onOpenSafetyModal,
+  onOpenSosModal,
+  onOpenHelpSupport,
 }) => {
   const { currentUser, firebaseUser, logout } = useAuth();
   const isLoggedIn = !!firebaseUser;
@@ -56,6 +61,38 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Dashboard
             </button>
+
+            {/* Help & Support Button */}
+            {onOpenHelpSupport && (
+              <button
+                onClick={onOpenHelpSupport}
+                className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-orange-600 flex items-center gap-1.5 transition-colors"
+              >
+                <LifeBuoy className="w-4 h-4 text-orange-500" />
+                <span>Help &amp; Support</span>
+              </button>
+            )}
+
+            {/* Safety & Trust */}
+            <button
+              onClick={onOpenSafetyModal}
+              className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-emerald-600 flex items-center gap-1.5 transition-colors"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <span>Safety</span>
+            </button>
+
+            {/* SOS Emergency Button */}
+            {onOpenSosModal && (
+              <button
+                onClick={onOpenSosModal}
+                className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black bg-red-600 hover:bg-red-700 text-white shadow-sm transition-all"
+                title="Trigger Emergency SOS"
+              >
+                <Siren className="w-3.5 h-3.5 animate-pulse" />
+                <span>SOS</span>
+              </button>
+            )}
 
             {/* Create Trip — ONLY when logged in */}
             {isLoggedIn && (
@@ -118,6 +155,19 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Mobile */}
           <div className="md:hidden flex items-center gap-2">
+            {onOpenSosModal && (
+              <button
+                onClick={onOpenSosModal}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-black bg-red-600 text-white"
+              >
+                <Siren className="w-3.5 h-3.5" /> SOS
+              </button>
+            )}
+            {onOpenHelpSupport && (
+              <button onClick={onOpenHelpSupport} className="p-1.5 text-slate-600">
+                <LifeBuoy className="w-4 h-4 text-orange-500" />
+              </button>
+            )}
             {isLoggedIn && (
               <button
                 onClick={onOpenCreateTrip}

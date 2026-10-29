@@ -9,15 +9,17 @@ import {
   Star, 
   UserCheck, 
   X,
-  Sparkles
+  Sparkles,
+  Siren
 } from 'lucide-react';
 
 interface SafetyModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onTriggerSos?: () => void;
 }
 
-export const SafetyModal: React.FC<SafetyModalProps> = ({ isOpen, onClose }) => {
+export const SafetyModal: React.FC<SafetyModalProps> = ({ isOpen, onClose, onTriggerSos }) => {
   const { currentUser, updateProfileBio } = useAuth();
   const [emergencyPhone, setEmergencyPhone] = useState(currentUser.emergencyContact || '');
   const [isSaved, setIsSaved] = useState(false);
@@ -77,6 +79,29 @@ export const SafetyModal: React.FC<SafetyModalProps> = ({ isOpen, onClose }) => 
               <span>{currentUser.tripsCount} Completed Journeys</span>
             </div>
           </div>
+
+          {/* Emergency SOS Quick Action Card */}
+          {onTriggerSos && (
+            <div className="p-4 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl border border-red-200 flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Siren className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-red-950 text-xs">Immediate Traveler Emergency (SOS)</h4>
+                  <p className="text-[11px] text-red-800/90 leading-tight mt-0.5">
+                    Need urgent help? Dispatch an alert with coordinates to emergency contacts.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { onClose(); onTriggerSos(); }}
+                className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 transition-colors shadow-sm flex items-center gap-1.5"
+              >
+                <Siren className="w-3.5 h-3.5" />
+                <span>Trigger SOS</span>
+              </button>
+            </div>
+          )}
 
           {/* Emergency Contact Setup */}
           <form onSubmit={handleSaveContact} className="p-4 bg-amber-50/50 rounded-xl border border-amber-200/80">

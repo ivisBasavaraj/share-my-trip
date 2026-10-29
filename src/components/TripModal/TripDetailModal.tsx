@@ -5,7 +5,7 @@ import { sendCompanionRequestApi } from '../../services/tripService';
 import {
   X, MapPin, Calendar, Clock, Car, Users, IndianRupee,
   User, ShieldCheck, Star, CheckCircle2, Loader2, UserCheck,
-  MessageSquare, Navigation, Sparkles
+  MessageSquare, Navigation, Sparkles, AlertCircle
 } from 'lucide-react';
 
 interface TripDetailModalProps {
@@ -28,6 +28,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
 
   const [reqStatus, setReqStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [message,   setMessage]   = useState('');
+  const [requestError, setRequestError] = useState('');
 
   const formatDeparture = () => {
     if (!trip.departureTime) return trip.startDate;
@@ -50,8 +51,13 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
 
   const handleRequestJoin = async () => {
     if (reqStatus !== 'idle') return;
+    if (trip.totalSeats != null && availableSeats === 0) {
+      setRequestError('Cannot request: All seats on this trip are occupied.');
+      return;
+    }
+    setRequestError('');
     setReqStatus('sending');
-    await sendCompanionRequestApi({
+    const res = await sendCompanionRequestApi({
       tripId:           trip.id,
       tripTitle:        trip.title,
       requesterId:      currentUser.id,
@@ -62,8 +68,21 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
       message:          message.trim() ||
         `Hi! I'd love to join your trip to ${trip.destination}. Please consider my request.`,
       compatibilityScore: 80,
+      requesterProfile: {
+        bio: currentUser.bio,
+        travelStyle: currentUser.travelStyle,
+        verificationStatus: currentUser.verificationStatus,
+        rating: currentUser.rating,
+        tripsCount: currentUser.tripsCount,
+        interests: currentUser.interests,
+      }
     });
-    setReqStatus('sent');
+    if (res.success) {
+      setReqStatus('sent');
+    } else {
+      setReqStatus('idle');
+      setRequestError(res.error || 'Failed to send join request. Please try again.');
+    }
   };
 
   return (
@@ -239,6 +258,12 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
                   />
                 </div>
+                {requestError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{requestError}</span>
+                  </div>
+                )}
                 <button
                   onClick={handleRequestJoin}
                   disabled={reqStatus === 'sending'}
