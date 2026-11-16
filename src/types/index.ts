@@ -15,7 +15,12 @@ export interface UserProfile {
   tripsCount: number;
   interests: string[];
   homeCity?: string;
+  phone?: string;
+  role?: 'driver' | 'user';
   emergencyContact?: string; // E2EE encrypted or phone
+  vehicleModel?: string;     // Primary registered car model
+  vehicleNumber?: string;    // Primary license plate
+  carPhotos?: string[];      // 4 mandatory inspection photos
   createdAt: string;
   updatedAt?: string;
 }
@@ -62,7 +67,9 @@ export interface Trip {
   updatedAt?: string;
   // ── Ride-sharing specific fields ──
   vehicle?: string;          // e.g. "Car", "Van", "Bus"
+  vehicleModel?: string;     // e.g. "Toyota Innova Crysta", "Hyundai Creta"
   vehicleNumber?: string;    // e.g. "KA-01-AB-1234"
+  carPhotos?: string[];      // minimum 4 vehicle photos (Front, Side, Rear, Interior)
   totalSeats?: number;       // total seats in vehicle
   costPerPerson?: number;    // cost per seat in ₹
   departureTime?: string;    // e.g. "2026-11-15T06:30"
@@ -156,6 +163,7 @@ export interface CompanionRequest {
   message: string;
   compatibilityScore: number;
   createdAt: string;
+  updatedAt?: string;
   requesterProfile?: Partial<UserProfile>;
 }
 

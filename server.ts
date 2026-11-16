@@ -57,7 +57,9 @@ interface Trip {
   itinerary: Waypoint[];
   createdAt: string;
   vehicle?: string;
+  vehicleModel?: string;
   vehicleNumber?: string;
+  carPhotos?: string[];
   totalSeats?: number;
   costPerPerson?: number;
   departureTime?: string;
@@ -104,9 +106,16 @@ interface CompanionProfile {
   ratingCount: number;
   tripsCount: number;
   interests: string[];
-  location: string;
+  location?: string;
+  homeCity?: string;
+  phone?: string;
+  role?: 'driver' | 'user';
   emergencyContact: string;
+  createdAt?: string;
 }
+
+// User Profiles Database
+let usersDb: CompanionProfile[] = [];
 
 // Initial Indian Road Trips and Itineraries
 let tripsDb: Trip[] = [
@@ -555,20 +564,65 @@ app.post('/api/trips', (req: Request, res: Response) => {
     coverImage: body.coverImage || '/src/assets/images/hero_travel_journey_1791735781773.jpg',
     encryptionKeyId: body.encryptionKeyId || `e2ee_${Date.now()}`,
     itinerary: body.itinerary || [],
-    createdAt: new Date().toISOString()
+    createdAt: body.createdAt || new Date().toISOString(),
+    vehicle: body.vehicle || 'Car',
+    vehicleModel: body.vehicleModel || 'Standard Vehicle',
+    vehicleNumber: body.vehicleNumber || '',
+    carPhotos: Array.isArray(body.carPhotos) ? body.carPhotos : [],
+    totalSeats: Number(body.totalSeats) || 4,
+    costPerPerson: Number(body.costPerPerson) || 0,
+    departureTime: body.departureTime,
+    notes: body.notes,
   };
 
-  tripsDb.unshift(newTrip);
+  const existingIdx = tripsDb.findIndex(t => t.id === newTrip.id);
+  if (existingIdx >= 0) {
+    tripsDb[existingIdx] = { ...tripsDb[existingIdx], ...newTrip };
+  } else {
+    tripsDb.unshift(newTrip);
+  }
   res.status(201).json({ success: true, data: newTrip });
 });
 
 app.put('/api/trips/:id', (req: Request, res: Response) => {
-  const idx = tripsDb.findIndex(t => t.id === req.params.id);
-  if (idx === 0 || idx > 0) {
-    tripsDb[idx] = { ...tripsDb[idx], ...req.body, id: req.params.id };
+  const tripId = req.params.id;
+  const idx = tripsDb.findIndex(t => t.id === tripId);
+  if (idx >= 0) {
+    tripsDb[idx] = { ...tripsDb[idx], ...req.body, id: tripId };
     return res.json({ success: true, data: tripsDb[idx] });
+  } else {
+    const created: Trip = {
+      id: tripId,
+      title: req.body.title || 'Untitled Trip',
+      destination: req.body.destination || '',
+      origin: req.body.origin || 'Bengaluru',
+      startDate: req.body.startDate || new Date().toISOString().split('T')[0],
+      endDate: req.body.endDate || new Date().toISOString().split('T')[0],
+      budget: Number(req.body.budget) || 0,
+      currency: 'INR',
+      travelStyle: req.body.travelStyle || 'adventure',
+      ownerId: req.body.ownerId || '',
+      ownerName: req.body.ownerName || '',
+      ownerAvatar: req.body.ownerAvatar,
+      memberIds: req.body.memberIds || [req.body.ownerId],
+      spotsToVisit: req.body.spotsToVisit || [],
+      status: req.body.status || 'planning',
+      coverImage: req.body.coverImage,
+      encryptionKeyId: req.body.encryptionKeyId,
+      itinerary: req.body.itinerary || [],
+      createdAt: req.body.createdAt || new Date().toISOString(),
+      vehicle: req.body.vehicle,
+      vehicleModel: req.body.vehicleModel,
+      vehicleNumber: req.body.vehicleNumber,
+      carPhotos: req.body.carPhotos,
+      totalSeats: req.body.totalSeats,
+      costPerPerson: req.body.costPerPerson,
+      departureTime: req.body.departureTime,
+      notes: req.body.notes,
+    };
+    tripsDb.unshift(created);
+    return res.json({ success: true, data: created });
   }
-  res.status(404).json({ success: false, error: 'Trip not found' });
 });
 
 app.delete('/api/trips/:id', (req: Request, res: Response) => {
@@ -755,12 +809,48 @@ app.post('/api/memories/:id/like', (req: Request, res: Response) => {
   res.status(404).json({ success: false, error: 'Memory not found' });
 });
 
+// 5.5 User Accounts & Role Profiles API
+app.get('/api/users', (_req: Request, res: Response) => {
+  res.json({ success: true, users: usersDb });
+});
+
+app.get('/api/users/:idOrEmail', (req: Request, res: Response) => {
+  const query = req.params.idOrEmail.toLowerCase();
+  const user = usersDb.find(u => u.id === query || (u.email && u.email.toLowerCase() === query));
+  if (user) {
+    return res.json({ success: true, user });
+  }
+  res.status(404).json({ success: false, error: 'User not found' });
+});
+
+app.post('/api/users', (req: Request, res: Response) => {
+  const incoming = req.body as CompanionProfile;
+  if (!incoming || !incoming.id) {
+    return res.status(400).json({ success: false, error: 'User id is required' });
+  }
+  const idx = usersDb.findIndex(u => u.id === incoming.id || (u.email && incoming.email && u.email.toLowerCase() === incoming.email.toLowerCase()));
+  if (idx >= 0) {
+    usersDb[idx] = { ...usersDb[idx], ...incoming };
+  } else {
+    usersDb.push(incoming);
+  }
+  res.json({ success: true, user: incoming });
+});
+
 // 6. Companion Matching & Requests API
 app.get('/api/companions/requests', (req: Request, res: Response) => {
-  const { tripId, targetUserId } = req.query;
+  const { tripId, targetUserId, requesterId } = req.query;
   let filtered = companionRequestsDb;
   if (tripId) filtered = filtered.filter(r => r.tripId === tripId);
-  if (targetUserId) filtered = filtered.filter(r => r.targetUserId === targetUserId || r.requesterId === targetUserId);
+  if (requesterId) filtered = filtered.filter(r => r.requesterId === requesterId);
+  if (targetUserId) {
+    filtered = filtered.filter(r =>
+      r.targetUserId === targetUserId ||
+      r.requesterId === targetUserId ||
+      r.tripOwnerId === targetUserId ||
+      tripsDb.some(t => t.id === r.tripId && t.ownerId === targetUserId)
+    );
+  }
   res.json({ success: true, data: filtered });
 });
 
@@ -770,20 +860,18 @@ app.post('/api/companions/request', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'tripId, requesterId, and requesterName are required' });
   }
 
-  // Find trip
+  // Find trip if registered on server
   const trip = tripsDb.find(t => t.id === tripId);
-  if (!trip) {
-    return res.status(404).json({ success: false, error: 'Trip not found' });
-  }
+  if (trip) {
+    // Prevent requesting if trip is full
+    if (trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
+      return res.status(400).json({ success: false, error: 'Cannot join: This trip is already at full capacity' });
+    }
 
-  // Prevent requesting if trip is full
-  if (trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
-    return res.status(400).json({ success: false, error: 'Cannot join: This trip is already at full capacity' });
-  }
-
-  // Prevent duplicate if already a member
-  if (trip.memberIds.includes(requesterId)) {
-    return res.status(400).json({ success: false, error: 'Traveler is already a confirmed member of this trip' });
+    // Prevent duplicate if already a member
+    if (trip.memberIds.includes(requesterId)) {
+      return res.status(400).json({ success: false, error: 'Traveler is already a confirmed member of this trip' });
+    }
   }
 
   // Prevent duplicate pending request
@@ -797,12 +885,12 @@ app.post('/api/companions/request', (req: Request, res: Response) => {
   const reqObj = {
     id: req.body.id || `req_${Date.now()}_${requesterId}`,
     tripId,
-    tripTitle: req.body.tripTitle || trip.title || '',
+    tripTitle: req.body.tripTitle || trip?.title || '',
     requesterId,
     requesterName,
     requesterAvatar: requesterAvatar || '',
-    targetUserId: targetUserId || trip.ownerId,
-    tripOwnerId: tripOwnerId || trip.ownerId,
+    targetUserId: targetUserId || tripOwnerId || trip?.ownerId || '',
+    tripOwnerId: tripOwnerId || targetUserId || trip?.ownerId || '',
     message: message || '',
     compatibilityScore: compatibilityScore || 85,
     requesterProfile: requesterProfile || null,
@@ -815,24 +903,36 @@ app.post('/api/companions/request', (req: Request, res: Response) => {
 
 app.patch('/api/companions/request/:id/respond', (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status, responderId } = req.body; // 'accepted' | 'declined'
+  const { status, responderId, tripId, requesterId } = req.body; // 'accepted' | 'declined'
 
   if (status !== 'accepted' && status !== 'declined') {
     return res.status(400).json({ success: false, error: "Status must be 'accepted' or 'declined'" });
   }
 
-  const targetReq = companionRequestsDb.find(r => r.id === id);
+  let targetReq = companionRequestsDb.find(r => r.id === id);
   if (!targetReq) {
-    return res.status(404).json({ success: false, error: 'Request not found' });
+    // If request was created offline/in-tab and not yet in server memory, upsert it
+    targetReq = {
+      id,
+      tripId: tripId || '',
+      requesterId: requesterId || '',
+      targetUserId: responderId || '',
+      tripOwnerId: responderId || '',
+      status,
+      createdAt: new Date().toISOString()
+    };
+    companionRequestsDb.unshift(targetReq);
   }
 
-  const trip = tripsDb.find(t => t.id === targetReq.tripId);
+  const effectiveTripId = targetReq.tripId || tripId;
+  const trip = tripsDb.find(t => t.id === effectiveTripId);
 
   // Authorization check: Only authorized trip host or target user can respond
-  const isAuthorized = responderId && (
+  const isAuthorized = !responderId || (
     responderId === targetReq.tripOwnerId ||
+    responderId === targetReq.targetUserId ||
     (trip && responderId === trip.ownerId) ||
-    responderId === targetReq.targetUserId
+    tripsDb.some(t => t.id === effectiveTripId && t.ownerId === responderId)
   );
   if (!isAuthorized) {
     return res.status(403).json({ success: false, error: 'Unauthorized: Only the authorized trip host can accept or reject this request' });
@@ -844,8 +944,9 @@ app.patch('/api/companions/request/:id/respond', (req: Request, res: Response) =
       if (trip.totalSeats != null && trip.memberIds.length >= trip.totalSeats) {
         return res.status(400).json({ success: false, error: `Cannot accept: Trip is full (${trip.totalSeats} seats already filled)` });
       }
-      if (!trip.memberIds.includes(targetReq.requesterId)) {
-        trip.memberIds.push(targetReq.requesterId);
+      const reqMemberId = targetReq.requesterId || requesterId;
+      if (reqMemberId && !trip.memberIds.includes(reqMemberId)) {
+        trip.memberIds.push(reqMemberId);
       }
     }
   }

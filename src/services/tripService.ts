@@ -52,6 +52,7 @@ import {
 // ─── Storage keys ────────────────────────────────────────────────────────────
 const KEY_TRIPS     = 'srsplatform_cached_trips_inr';
 const KEY_MEMORIES  = 'srsplatform_cached_memories_inr';
+const KEY_COMPANION_REQUESTS = 'srsplatform_companion_requests';
 const MSG_EVENT     = 'srsplatform:messages-changed';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -117,8 +118,42 @@ export function getLocalTrips(): Trip[] {
 }
 
 export function saveLocalTrips(trips: Trip[]) {
-  try { localStorage.setItem(KEY_TRIPS, JSON.stringify(trips)); }
-  catch (e) { console.warn('saveLocalTrips failed:', e); }
+  try {
+    localStorage.setItem(KEY_TRIPS, JSON.stringify(trips));
+    window.dispatchEvent(new CustomEvent('srsplatform:trips-changed', { detail: trips }));
+  } catch (e) {
+    console.warn('saveLocalTrips failed:', e);
+  }
+}
+
+/**
+ * Fetch latest trips directly from backend API and merge.
+ */
+export async function syncTripsWithBackend(): Promise<Trip[]> {
+  try {
+    const res = await fetch('/api/trips');
+    if (res.ok) {
+      const json = await res.json();
+      const serverTrips = json.data || json;
+      if (Array.isArray(serverTrips) && serverTrips.length > 0) {
+        const local = getLocalTrips();
+        const map = new Map<string, Trip>();
+        serverTrips.forEach((t: Trip) => map.set(t.id, t));
+        local.forEach(t => {
+          const existing = map.get(t.id);
+          if (!existing || new Date(t.updatedAt || t.createdAt) > new Date(existing.updatedAt || existing.createdAt)) {
+            map.set(t.id, { ...existing, ...t });
+          }
+        });
+        const merged = [...map.values()].sort(
+          (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+        );
+        saveLocalTrips(merged);
+        return merged;
+      }
+    }
+  } catch (_) {}
+  return getLocalTrips();
 }
 
 /**
@@ -131,55 +166,78 @@ function seedDemoTripsIfEmpty() {
 
 /**
  * Subscribe to the live trips list.
- *
- * Flow:
- *   1. Immediately emit whatever is in localStorage (instant render).
- *   2. Firestore onSnapshot replaces with authoritative data.
- *   3. If Firestore is empty AND we have no cache → seed demo trips once.
+ * Multi-channel real-time synchronization:
+ *   1. Immediate localStorage render.
+ *   2. StorageEvent for instant cross-tab sync.
+ *   3. CustomEvent for immediate in-tab sync.
+ *   4. Fast REST backend polling (/api/trips) every 2.5s for cross-browser sync.
+ *   5. Firestore onSnapshot real-time listener.
  */
 export function subscribeToTrips(
   onUpdate: (trips: Trip[]) => void,
   onError?: (err: Error) => void
 ): () => void {
+  const unsubs: Array<() => void> = [];
+
   // Emit cached data immediately so the UI isn't blank
   const cached = getLocalTrips();
   if (cached.length > 0) onUpdate(cached);
 
+  // 1. Cross-tab sync via storage event
+  const handleStorage = (e: StorageEvent) => {
+    if (e.key === KEY_TRIPS && e.newValue) {
+      try {
+        const parsed = JSON.parse(e.newValue);
+        if (Array.isArray(parsed)) onUpdate(parsed);
+      } catch (_) {}
+    }
+  };
+  window.addEventListener('storage', handleStorage);
+  unsubs.push(() => window.removeEventListener('storage', handleStorage));
+
+  // 2. In-tab custom event
+  const handleCustom = (e: any) => {
+    if (Array.isArray(e.detail)) onUpdate(e.detail);
+    else onUpdate(getLocalTrips());
+  };
+  window.addEventListener('srsplatform:trips-changed', handleCustom);
+  unsubs.push(() => window.removeEventListener('srsplatform:trips-changed', handleCustom));
+
+  // 3. Fast REST backend polling (/api/trips)
+  syncTripsWithBackend().then(trips => { if (trips.length > 0) onUpdate(trips); });
+  const pollTimer = setInterval(() => {
+    syncTripsWithBackend().then(trips => { if (trips.length > 0) onUpdate(trips); });
+  }, 2500);
+  unsubs.push(() => clearInterval(pollTimer));
+
+  // 4. Firestore onSnapshot real-time listener
   try {
     const col = collection(db, 'trips');
     const q   = query(col, orderBy('createdAt', 'desc'));
 
-    const unsub = onSnapshot(
+    const firestoreUnsub = onSnapshot(
       q,
       (snap) => {
         if (!snap.empty) {
-          // Real Firestore data — use it exclusively (no merge with seed)
           const remote: Trip[] = snap.docs.map(d => ({
             id: d.id,
             ...(d.data() as Omit<Trip, 'id'>),
           }));
           saveLocalTrips(remote);
           onUpdate(remote);
-        } else {
-          // Firestore is empty → fall back to local cache or seed demo data
-          seedDemoTripsIfEmpty();
-          onUpdate(getLocalTrips());
         }
       },
       (err) => {
         console.warn('Firestore trips offline:', err.message);
         if (onError) onError(err);
-        // Ensure the UI still has something to show while offline
-        if (cached.length === 0) seedDemoTripsIfEmpty();
-        onUpdate(getLocalTrips());
       }
     );
-    return unsub;
+    unsubs.push(firestoreUnsub);
   } catch (err) {
-    seedDemoTripsIfEmpty();
-    onUpdate(getLocalTrips());
-    return () => {};
+    console.warn('Firestore subscription error:', err);
   }
+
+  return () => unsubs.forEach(u => u());
 }
 
 /**
@@ -293,14 +351,21 @@ export async function createTrip(trip: Trip): Promise<void> {
 export async function updateTrip(trip: Trip): Promise<void> {
   const current = getLocalTrips();
   const idx = current.findIndex(t => t.id === trip.id);
-  if (idx >= 0) { current[idx] = trip; saveLocalTrips(current); }
+  const updatedTrip: Trip = { ...trip, updatedAt: new Date().toISOString() };
+  if (idx >= 0) {
+    current[idx] = { ...current[idx], ...updatedTrip };
+  } else {
+    current.unshift(updatedTrip);
+  }
+  saveLocalTrips(current);
 
   await apiCall(`/api/trips/${trip.id}`, {
-    method: 'PUT', body: JSON.stringify(trip),
+    method: 'PUT',
+    body: JSON.stringify(updatedTrip),
   });
 
   try {
-    const { itinerary, ...tripData } = trip;
+    const { itinerary, ...tripData } = updatedTrip;
     await setDoc(doc(db, 'trips', trip.id), tripData, { merge: true });
   } catch (err) {
     console.warn('Trip update queued:', err);
@@ -991,8 +1056,74 @@ export async function uploadDataUrl(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Retrieve cached companion requests from localStorage.
+ */
+export function getLocalCompanionRequests(): CompanionRequest[] {
+  try {
+    const raw = localStorage.getItem(KEY_COMPANION_REQUESTS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save companion requests to localStorage and broadcast change events.
+ */
+export function saveLocalCompanionRequests(requests: CompanionRequest[]): void {
+  try {
+    localStorage.setItem(KEY_COMPANION_REQUESTS, JSON.stringify(requests));
+    window.dispatchEvent(
+      new CustomEvent('srsplatform:requests-changed', { detail: requests })
+    );
+  } catch (err) {
+    console.warn('Failed to save companion requests to localStorage:', err);
+  }
+}
+
+/**
+ * Sync requests with Express backend and merge into local cache.
+ */
+export async function syncCompanionRequestsWithBackend(opts?: {
+  tripId?: string;
+  targetUserId?: string;
+  requesterId?: string;
+  tripOwnerId?: string;
+}): Promise<CompanionRequest[]> {
+  try {
+    const qs = new URLSearchParams();
+    if (opts?.tripId) qs.append('tripId', opts.tripId);
+    if (opts?.targetUserId) qs.append('targetUserId', opts.targetUserId);
+    if (opts?.requesterId) qs.append('requesterId', opts.requesterId);
+
+    const queryStr = qs.toString();
+    const url = `/api/companions/requests${queryStr ? `?${queryStr}` : ''}`;
+    const serverRequests = await apiCall<CompanionRequest[]>(url);
+
+    if (Array.isArray(serverRequests)) {
+      const current = getLocalCompanionRequests();
+      const map = new Map<string, CompanionRequest>();
+      // put existing local first
+      current.forEach(r => map.set(r.id, r));
+      // merge server requests (overwriting or adding)
+      serverRequests.forEach(r => map.set(r.id, r));
+      const merged = [...map.values()].sort(
+        (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+      );
+      saveLocalCompanionRequests(merged);
+      return merged;
+    }
+  } catch (err) {
+    console.warn('Failed to sync companion requests with backend:', err);
+  }
+  return getLocalCompanionRequests();
+}
+
+/**
  * Send a join request.
- * Stored in TWO places so both sides can query:
+ * Stored in localStorage, backend REST API, and Firestore:
  *   /companionRequests/{id}                      ← queried by targetUserId (inbox)
  *   /trips/{tripId}/companionRequests/{id}        ← queried by trip owner
  */
@@ -1024,12 +1155,12 @@ export async function sendCompanionRequestApi(payload: {
   const req: CompanionRequest = {
     id,
     tripId:             payload.tripId,
-    tripTitle:          payload.tripTitle,
+    tripTitle:          payload.tripTitle || trip?.title || '',
     requesterId:        payload.requesterId,
     requesterName:      payload.requesterName,
     requesterAvatar:    payload.requesterAvatar,
-    targetUserId:       payload.targetUserId,
-    tripOwnerId:        payload.tripOwnerId || '',
+    targetUserId:       payload.targetUserId || payload.tripOwnerId || trip?.ownerId || '',
+    tripOwnerId:        payload.tripOwnerId || payload.targetUserId || trip?.ownerId || '',
     status:             'pending',
     message:            payload.message,
     compatibilityScore: payload.compatibilityScore || 70,
@@ -1037,6 +1168,11 @@ export async function sendCompanionRequestApi(payload: {
     requesterProfile:   payload.requesterProfile,
   };
 
+  // 1. Immediately cache in localStorage & dispatch event (0ms cross-tab and in-tab sync)
+  const current = getLocalCompanionRequests();
+  saveLocalCompanionRequests([req, ...current.filter(r => r.id !== id)]);
+
+  // 2. Write to Firestore
   try {
     // top-level — so target user can query their inbox
     await setDoc(doc(db, 'companionRequests', id), req);
@@ -1046,15 +1182,22 @@ export async function sendCompanionRequestApi(payload: {
     console.warn('Companion request Firestore error:', err);
   }
 
+  // 3. Post to backend REST API
   try {
     const res = await fetch('/api/companions/request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, id }),
+      body: JSON.stringify({ ...payload, id, targetUserId: req.targetUserId, tripOwnerId: req.tripOwnerId }),
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
       return { success: false, error: data.error || 'Failed to submit join request.' };
+    }
+    if (data.data) {
+      const updated = getLocalCompanionRequests();
+      const idx = updated.findIndex(r => r.id === id);
+      if (idx >= 0) updated[idx] = data.data; else updated.unshift(data.data);
+      saveLocalCompanionRequests(updated);
     }
     return { success: true };
   } catch (err) {
@@ -1064,29 +1207,81 @@ export async function sendCompanionRequestApi(payload: {
 }
 
 /**
- * Real-time listener for companion requests.
- * Pass targetUserId  → user sees their inbox (requests sent TO them).
- * Pass tripId        → trip owner sees all requests for their trip.
- * Pass requesterId   → user sees requests they sent (outbox).
- * All three can be combined; results are deduplicated.
+ * Real-time listener for companion requests with multi-channel sync:
+ *   1. Immediate localStorage render.
+ *   2. StorageEvent for cross-tab sync.
+ *   3. CustomEvent for in-tab sync.
+ *   4. Fast REST polling (/api/companions/requests) every 2.5s.
+ *   5. Firestore onSnapshot real-time listener.
  */
 export function subscribeToCompanionRequests(
-  opts: { tripId?: string; targetUserId?: string; requesterId?: string },
+  opts: { tripId?: string; targetUserId?: string; requesterId?: string; tripOwnerId?: string },
   onUpdate: (requests: CompanionRequest[]) => void
 ): () => void {
   const cache = new Map<string, CompanionRequest>();
   const unsubs: Array<() => void> = [];
 
-  const emit = (items: CompanionRequest[]) => {
-    items.forEach(r => cache.set(r.id, r));
-    onUpdate(
-      [...cache.values()].sort(
-        (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
-      )
-    );
+  const filterMatches = (r: CompanionRequest): boolean => {
+    // If no filter opts provided, match all
+    if (!opts.targetUserId && !opts.tripId && !opts.requesterId && !opts.tripOwnerId) return true;
+
+    if (opts.tripId && r.tripId === opts.tripId) return true;
+    if (opts.requesterId && r.requesterId === opts.requesterId) return true;
+    if (opts.targetUserId) {
+      if (r.targetUserId === opts.targetUserId || r.tripOwnerId === opts.targetUserId) return true;
+      // Also check if the trip is owned by this user
+      const localTrip = getLocalTrips().find(t => t.id === r.tripId);
+      if (localTrip && localTrip.ownerId === opts.targetUserId) return true;
+    }
+    if (opts.tripOwnerId && (r.tripOwnerId === opts.tripOwnerId || r.targetUserId === opts.tripOwnerId)) return true;
+
+    return false;
   };
 
-  // 1. Requests WHERE I am the target (my inbox)
+  const emit = (items: CompanionRequest[]) => {
+    items.forEach(r => {
+      if (filterMatches(r)) {
+        cache.set(r.id, r);
+      }
+    });
+    const sorted = [...cache.values()].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    );
+    onUpdate(sorted);
+  };
+
+  // 1. Initial emit from local cache
+  const localItems = getLocalCompanionRequests();
+  emit(localItems);
+
+  // 2. Storage event listener (cross-tab real-time sync)
+  const handleStorage = (e: StorageEvent) => {
+    if (e.key === KEY_COMPANION_REQUESTS && e.newValue) {
+      try {
+        const parsed = JSON.parse(e.newValue);
+        if (Array.isArray(parsed)) emit(parsed);
+      } catch (_) {}
+    }
+  };
+  window.addEventListener('storage', handleStorage);
+  unsubs.push(() => window.removeEventListener('storage', handleStorage));
+
+  // 3. Custom event listener (in-tab real-time sync)
+  const handleCustom = (e: any) => {
+    if (Array.isArray(e.detail)) emit(e.detail);
+    else emit(getLocalCompanionRequests());
+  };
+  window.addEventListener('srsplatform:requests-changed', handleCustom);
+  unsubs.push(() => window.removeEventListener('srsplatform:requests-changed', handleCustom));
+
+  // 4. REST backend polling every 2.5s
+  syncCompanionRequestsWithBackend(opts).then(reqs => { if (reqs.length > 0) emit(reqs); });
+  const pollTimer = setInterval(() => {
+    syncCompanionRequestsWithBackend(opts).then(reqs => { if (reqs.length > 0) emit(reqs); });
+  }, 2500);
+  unsubs.push(() => clearInterval(pollTimer));
+
+  // 5. Firestore real-time listeners
   if (opts.targetUserId) {
     try {
       const q = query(
@@ -1100,7 +1295,6 @@ export function subscribeToCompanionRequests(
     } catch { /* offline */ }
   }
 
-  // 2. All requests for a specific trip (trip-owner view)
   if (opts.tripId) {
     try {
       const q = query(collection(db, 'trips', opts.tripId, 'companionRequests'));
@@ -1111,7 +1305,6 @@ export function subscribeToCompanionRequests(
     } catch { /* offline */ }
   }
 
-  // 3. Requests I sent (outbox)
   if (opts.requesterId) {
     try {
       const q = query(
@@ -1134,6 +1327,14 @@ export async function fetchCompanionRequests(
 ): Promise<CompanionRequest[]> {
   const map = new Map<string, CompanionRequest>();
 
+  // Check local cache first
+  const localList = getLocalCompanionRequests();
+  localList.forEach(r => {
+    if ((tripId && r.tripId === tripId) || (targetUserId && (r.targetUserId === targetUserId || r.tripOwnerId === targetUserId))) {
+      map.set(r.id, r);
+    }
+  });
+
   // inbox: all requests sent TO this user
   if (targetUserId) {
     try {
@@ -1152,14 +1353,16 @@ export async function fetchCompanionRequests(
     } catch { /* offline */ }
   }
 
-  if (map.size > 0)
-    return [...map.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-
   // Express fallback
-  const qs = new URLSearchParams();
-  if (tripId) qs.append('tripId', tripId);
-  if (targetUserId) qs.append('targetUserId', targetUserId);
-  return (await apiCall<CompanionRequest[]>(`/api/companions/requests?${qs}`)) || [];
+  try {
+    const qs = new URLSearchParams();
+    if (tripId) qs.append('tripId', tripId);
+    if (targetUserId) qs.append('targetUserId', targetUserId);
+    const serverList = (await apiCall<CompanionRequest[]>(`/api/companions/requests?${qs}`)) || [];
+    serverList.forEach(r => map.set(r.id, r));
+  } catch {}
+
+  return [...map.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
 /**
@@ -1182,12 +1385,30 @@ export async function respondToCompanionRequest(
     }
   }
 
-  // Call backend API first to enforce permissions & capacity
+  // 1. Optimistically update local companion requests cache & broadcast
+  const cachedReqs = getLocalCompanionRequests();
+  const reqIdx = cachedReqs.findIndex(r => r.id === requestId);
+  if (reqIdx >= 0) {
+    cachedReqs[reqIdx] = { ...cachedReqs[reqIdx], status, updatedAt: new Date().toISOString() };
+    saveLocalCompanionRequests([...cachedReqs]);
+  }
+
+  // 1b. If accepted, optimistically update trip members
+  if (status === 'accepted' && tripId && requesterId) {
+    const trips = getLocalTrips();
+    const trip = trips.find(t => t.id === tripId);
+    if (trip && !trip.memberIds.includes(requesterId)) {
+      trip.memberIds = [...trip.memberIds, requesterId];
+      saveLocalTrips([...trips]);
+    }
+  }
+
+  // 2. Call backend API
   try {
     const res = await fetch(`/api/companions/request/${encodeURIComponent(requestId)}/respond`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, responderId }),
+      body: JSON.stringify({ status, responderId, tripId, requesterId }),
     });
     const resData = await res.json();
     if (!res.ok || !resData.success) {
@@ -1197,11 +1418,11 @@ export async function respondToCompanionRequest(
     // offline bridge
   }
 
-  // update top-level doc
+  // 3. Update top-level doc in Firestore
   try { await updateDoc(doc(db, 'companionRequests', requestId), { status }); }
   catch { /* offline */ }
 
-  // update subcollection doc
+  // 4. Update subcollection doc in Firestore
   if (tripId) {
     try { await updateDoc(doc(db, 'trips', tripId, 'companionRequests', requestId), { status }); }
     catch { /* offline */ }

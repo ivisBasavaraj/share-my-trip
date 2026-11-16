@@ -17,11 +17,13 @@ export interface RegisterPayload {
   fullName: string;
   email: string;
   password: string;
-  bio: string;
-  travelStyle: TravelStyle;
-  interests: string[];
+  phone: string;
+  role: 'driver' | 'user';
+  emergencyContact: string;
+  bio?: string;
+  travelStyle?: TravelStyle;
+  interests?: string[];
   homeCity?: string;
-  phone?: string;
   photoURL?: string;
 }
 
@@ -36,6 +38,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   switchProfile: (userId: string) => void;
   updateProfileBio: (bio: string, interests: string[], emergencyContact: string) => Promise<void>;
+  updateVehicleInfo: (vehicleModel: string, vehicleNumber: string, carPhotos: string[]) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -68,7 +71,12 @@ function profileFromDoc(data: Record<string, any>, uid: string): UserProfile {
     tripsCount: data.tripsCount ?? 0,
     interests: data.interests || [],
     homeCity: data.homeCity || '',
+    phone: data.phone || '',
+    role: data.role || (data.interests?.includes('Driver') ? 'driver' : 'user'),
     emergencyContact: data.emergencyContact || '',
+    vehicleModel: data.vehicleModel || '',
+    vehicleNumber: data.vehicleNumber || '',
+    carPhotos: Array.isArray(data.carPhotos) ? data.carPhotos : undefined,
     createdAt: data.createdAt || new Date().toISOString(),
     updatedAt: data.updatedAt,
   };
@@ -112,17 +120,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // ── Load all users from Firestore ──
+  // ── Load all users from Firestore and Express backend ──
   const loadAllUsers = async () => {
+    const userMap = new Map<string, UserProfile>();
     try {
       const snap = await getDocs(collection(db, 'users'));
       if (!snap.empty) {
-        setAllUsers(
-          snap.docs.map(d => profileFromDoc(d.data() as Record<string, any>, d.id))
-        );
+        snap.docs.forEach(d => userMap.set(d.id, profileFromDoc(d.data() as Record<string, any>, d.id)));
       }
     } catch (err) {
-      console.warn('Could not load all users (offline?):', err);
+      console.warn('Could not load all users from Firestore (offline?):', err);
+    }
+
+    try {
+      const res = await fetch('/api/users');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.users)) {
+          data.users.forEach((u: any) => {
+            if (u.id && !userMap.has(u.id)) {
+              userMap.set(u.id, u);
+            }
+          });
+        }
+      }
+    } catch (_) {}
+
+    if (userMap.size > 0) {
+      setAllUsers([...userMap.values()]);
     }
   };
 
@@ -144,35 +169,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      let profile: UserProfile | null = null;
+      let localFallback: UserProfile | undefined;
+      try {
+        const reg = JSON.parse(localStorage.getItem('srsplatform_user_registry') || '{}');
+        localFallback = (user.email && reg[user.email.toLowerCase()]) || reg[user.uid];
+      } catch (_) {}
+
       try {
         const ref  = doc(db, 'users', user.uid);
         const snap = await getDoc(ref);
 
         if (snap.exists()) {
-          const profile = profileFromDoc(snap.data() as Record<string, any>, user.uid);
-          setCurrentUser(profile);
-          localStorage.setItem('srsplatform_active_user', JSON.stringify(profile));
+          profile = profileFromDoc(snap.data() as Record<string, any>, user.uid);
+          if (!profile.role && localFallback?.role) {
+            profile.role = localFallback.role;
+          }
+        }
+      } catch (err) {
+        console.warn('Firestore sync error (offline?):', err);
+      }
+
+      // Check backend API if profile not resolved or role missing
+      if (!profile || !profile.role) {
+        try {
+          const res = await fetch(`/api/users/${encodeURIComponent(user.uid)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.user) {
+              profile = { ...data.user, id: user.uid };
+            }
+          } else if (user.email) {
+            const resEmail = await fetch(`/api/users/${encodeURIComponent(user.email)}`);
+            if (resEmail.ok) {
+              const data = await resEmail.json();
+              if (data?.user) {
+                profile = { ...data.user, id: user.uid };
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!profile) {
+        if (localFallback) {
+          profile = { ...localFallback, id: user.uid };
         } else {
-          const newProfile: UserProfile = {
+          profile = {
             id: user.uid,
-            displayName: user.displayName || 'New Traveler',
+            displayName: user.displayName || 'Traveler',
             email: user.email || '',
             photoURL: user.photoURL || '/src/assets/images/avatar_traveler_alex_1791735824369.jpg',
             bio: 'Passionate explorer on Smart Ride Sharing Platform.',
             travelStyle: 'adventure',
             verificationStatus: user.emailVerified ? 'verified' : 'pending',
             rating: 5.0, ratingCount: 0, tripsCount: 0,
-            interests: ['Hiking', 'Culture', 'Eco-Travel'],
+            interests: ['Road Trips'],
+            role: 'user',
             createdAt: new Date().toISOString(),
           };
-          await setDoc(ref, newProfile);
-          setCurrentUser(newProfile);
-          localStorage.setItem('srsplatform_active_user', JSON.stringify(newProfile));
+          try {
+            await setDoc(doc(db, 'users', user.uid), profile);
+          } catch (_) {}
         }
-        await loadAllUsers();
-      } catch (err) {
-        console.warn('Firestore sync error (offline?):', err);
       }
+
+      if (!profile.role) {
+        profile.role = localFallback?.role || 'user';
+      }
+
+      setCurrentUser(profile);
+      localStorage.setItem('srsplatform_active_user', JSON.stringify(profile));
+      await loadAllUsers();
     });
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,19 +268,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       displayName: payload.fullName.trim(),
       email: payload.email.trim(),
       photoURL,
-      bio: payload.bio.trim(),
-      travelStyle: payload.travelStyle,
+      bio: payload.bio?.trim() || (payload.role === 'driver' ? 'Registered Driver on Smart Ride Sharing' : 'Registered Passenger on Smart Ride Sharing'),
+      travelStyle: payload.travelStyle || 'adventure',
       verificationStatus: 'pending',
       rating: 5.0, ratingCount: 0, tripsCount: 0,
-      interests: payload.interests,
-      emergencyContact: payload.phone ? `${payload.phone.trim()} (ICE)` : '',
+      interests: payload.interests || (payload.role === 'driver' ? ['Driver', 'Road Trips'] : ['Road Trips']),
+      phone: payload.phone.trim(),
+      role: payload.role,
+      emergencyContact: payload.emergencyContact.trim(),
       homeCity: payload.homeCity?.trim() || '',
       createdAt: new Date().toISOString(),
     };
 
-    await setDoc(doc(db, 'users', user.uid), profile);
-    setCurrentUser(profile);
-    localStorage.setItem('srsplatform_active_user', JSON.stringify(profile));
+    // 1. Save to local persistent user registry for instant recovery
+    try {
+      const reg = JSON.parse(localStorage.getItem('srsplatform_user_registry') || '{}');
+      reg[user.uid] = profile;
+      if (profile.email) reg[profile.email.toLowerCase()] = profile;
+      localStorage.setItem('srsplatform_user_registry', JSON.stringify(reg));
+    } catch (_) {}
+
+    // 2. Save to Express REST API
+    try {
+      await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+    } catch (_) {}
+
+    // 3. Save to Firestore
+    try {
+      await setDoc(doc(db, 'users', user.uid), profile);
+    } catch (err) {
+      console.warn('Firestore setDoc user profile warning:', err);
+    }
+
+    // Sign out from Firebase immediately so user can log in via the login screen
+    try { await fbSignOut(auth); } catch (_) {}
+    setCurrentUser(DEFAULT_PROFILE);
+    setFirebaseUser(null);
+    localStorage.removeItem('srsplatform_active_user');
     await loadAllUsers();
   };
 
@@ -248,11 +344,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateVehicleInfo = async (vehicleModel: string, vehicleNumber: string, carPhotos: string[]) => {
+    const updated: UserProfile = {
+      ...currentUser,
+      vehicleModel,
+      vehicleNumber,
+      carPhotos,
+      updatedAt: new Date().toISOString(),
+    };
+    setCurrentUser(updated);
+    localStorage.setItem('srsplatform_active_user', JSON.stringify(updated));
+
+    // Update local registry
+    try {
+      const reg = JSON.parse(localStorage.getItem('srsplatform_user_registry') || '{}');
+      reg[currentUser.id] = updated;
+      if (updated.email) reg[updated.email.toLowerCase()] = updated;
+      localStorage.setItem('srsplatform_user_registry', JSON.stringify(reg));
+    } catch (_) {}
+
+    // Update Express backend API
+    try {
+      await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+    } catch (_) {}
+
+    // Update Firestore
+    try {
+      await setDoc(doc(db, 'users', currentUser.id), updated, { merge: true });
+      await loadAllUsers();
+    } catch (err) {
+      console.warn('Firestore update vehicle error (offline?):', err);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{
       currentUser, firebaseUser, isOnline, allUsers,
       loginWithGoogle, loginAnonymously, registerWithEmail,
-      logout, switchProfile, updateProfileBio,
+      logout, switchProfile, updateProfileBio, updateVehicleInfo,
     }}>
       {children}
     </AuthContext.Provider>

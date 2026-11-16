@@ -36,6 +36,10 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
   const [travelStyle, setTravelStyle] = useState<TravelStyle>(trip.travelStyle);
   const [status, setStatus] = useState<Trip['status']>(trip.status);
   const [spotsInput, setSpotsInput] = useState(trip.spotsToVisit.join(', '));
+  const [vehicleModel, setVehicleModel] = useState(trip.vehicleModel || trip.vehicle || 'Toyota Innova Crysta');
+  const [vehicleNumber, setVehicleNumber] = useState(trip.vehicleNumber || '');
+  const [totalSeats, setTotalSeats] = useState((trip.totalSeats || 4).toString());
+  const [costPerPerson, setCostPerPerson] = useState((trip.costPerPerson || 0).toString());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -49,6 +53,10 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
     setTravelStyle(trip.travelStyle);
     setStatus(trip.status);
     setSpotsInput(trip.spotsToVisit.join(', '));
+    setVehicleModel(trip.vehicleModel || trip.vehicle || 'Toyota Innova Crysta');
+    setVehicleNumber(trip.vehicleNumber || '');
+    setTotalSeats((trip.totalSeats || 4).toString());
+    setCostPerPerson((trip.costPerPerson || 0).toString());
     setShowDeleteConfirm(false);
   }, [trip]);
 
@@ -74,7 +82,11 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
       budget: parseFloat(budget) || trip.budget,
       travelStyle,
       status,
-      spotsToVisit: spotsList
+      spotsToVisit: spotsList,
+      vehicleModel: vehicleModel.trim() || undefined,
+      vehicleNumber: vehicleNumber.trim().toUpperCase() || undefined,
+      totalSeats: parseInt(totalSeats, 10) || 4,
+      costPerPerson: parseFloat(costPerPerson) || 0,
     };
 
     await updateTrip(updated);
@@ -215,6 +227,55 @@ export const EditTripModal: React.FC<EditTripModalProps> = ({
               onChange={e => setSpotsInput(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
             />
+          </div>
+
+          {/* Vehicle Model & Registration Number */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Car Model</label>
+              <input
+                type="text"
+                value={vehicleModel}
+                onChange={e => setVehicleModel(e.target.value)}
+                placeholder="e.g. Toyota Innova Crysta"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">License Plate</label>
+              <input
+                type="text"
+                value={vehicleNumber}
+                onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
+                placeholder="e.g. KA-04-MB-4521"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900 font-mono uppercase"
+              />
+            </div>
+          </div>
+
+          {/* Seats & Cost per Seat */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Total Passenger Seats</label>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={totalSeats}
+                onChange={e => setTotalSeats(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Cost per Seat (₹)</label>
+              <input
+                type="number"
+                min="0"
+                value={costPerPerson}
+                onChange={e => setCostPerPerson(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900 font-mono"
+              />
+            </div>
           </div>
 
           {/* Delete Danger Zone */}
