@@ -18,6 +18,8 @@ import { Header } from './components/Header';
 import { HomePage } from './components/Home/HomePage';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { RegisterScreen } from './components/Auth/RegisterScreen';
+import { UserDashboard } from './components/Dashboard/UserDashboard';
+import { DriverDashboard } from './components/Dashboard/DriverDashboard';
 import { TravelMap } from './components/Map/TravelMap';
 import { ItineraryEditor } from './components/Itinerary/ItineraryEditor';
 import { CompanionMatching } from './components/Companion/CompanionMatching';
@@ -39,10 +41,10 @@ import {
   Calendar, MapPin, IndianRupee, Sparkles, Navigation,
   ChevronDown, ArrowRight, ArrowLeft, MessageSquare, Package,
   CloudSun, Share2, Edit3, Users, Plus, Copy, CheckCircle2,
-  UserCheck, Clock, Car, Info, X, Siren, LifeBuoy,
+  UserCheck, Clock, Car, Info, X, Siren, LifeBuoy, ShieldCheck,
 } from 'lucide-react';
 
-type AppView = 'home' | 'workspace' | 'login' | 'register';
+type AppView = 'home' | 'workspace' | 'trip-workspace' | 'login' | 'register';
 type WorkspaceTab = 'itinerary' | 'channel' | 'companions' | 'expenses' | 'memories' | 'packing' | 'organizer';
 type DashboardTab = 'available' | 'my' | 'joined';
 
@@ -70,6 +72,8 @@ function MainApp() {
   const [showWeatherDrawer,   setShowWeatherDrawer]   = useState(false);
   const [showSosModal,         setShowSosModal]         = useState(false);
   const [showHelpSupportModal, setShowHelpSupportModal] = useState(false);
+  const [loginMessage,        setLoginMessage]        = useState('');
+  const [loginPrefillEmail,   setLoginPrefillEmail]   = useState('');
 
   // Accepted Join Request notifications for the traveler (Requirement 5)
   interface AcceptedJoinNotification {
@@ -161,24 +165,50 @@ function MainApp() {
   const myTrips        = trips.filter(t => t.ownerId === currentUser.id);
   const joinedTrips    = trips.filter(t => t.memberIds.includes(currentUser.id) && t.ownerId !== currentUser.id);
 
-  if (currentView === 'login')    return <LoginScreen    onSuccess={() => setCurrentView('workspace')} onBackToHome={() => setCurrentView('home')} onGoToRegister={() => setCurrentView('register')} />;
-  if (currentView === 'register') return <RegisterScreen onSuccess={() => setCurrentView('workspace')} onBackToLogin={() => setCurrentView('login')} />;
+  if (currentView === 'login') {
+    return (
+      <LoginScreen
+        onSuccess={() => {
+          setLoginMessage('');
+          setCurrentView('workspace');
+        }}
+        onBackToHome={() => setCurrentView('home')}
+        onGoToRegister={() => {
+          setLoginMessage('');
+          setCurrentView('register');
+        }}
+        initialMessage={loginMessage}
+        initialEmail={loginPrefillEmail}
+      />
+    );
+  }
+
+  if (currentView === 'register') {
+    return (
+      <RegisterScreen
+        onSuccess={(registeredEmail) => {
+          setLoginPrefillEmail(registeredEmail || '');
+          setLoginMessage('Account created successfully! Please sign in with your email and password.');
+          setCurrentView('login');
+        }}
+        onBackToLogin={() => {
+          setLoginMessage('');
+          setCurrentView('login');
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col" style={{ fontFamily: "'Montserrat', sans-serif" }}>
 
       {/* Header */}
       <Header
-        currentView={currentView} setCurrentView={setCurrentView}
-        activeTab={activeTab} setActiveTab={setActiveTab}
+        currentView={currentView}
+        setCurrentView={setCurrentView}
         onOpenCreateTrip={() => { setCurrentView('workspace'); setShowCreateTripModal(true); }}
-        onOpenSafetyModal={() => setShowSafetyModal(true)}
         onOpenLogin={() => setCurrentView('login')}
         onOpenRegister={() => setCurrentView('register')}
-        onOpenServicesModal={() => setShowServicesModal(true)}
-        onOpenExportModal={() => setShowExportModal(true)}
-        onOpenSosModal={() => setShowSosModal(true)}
-        onOpenHelpSupport={() => setShowHelpSupportModal(true)}
       />
 
       {/* ── THANK-YOU ACCEPTANCE BANNER (Requirement 5) ── */}
@@ -229,227 +259,96 @@ function MainApp() {
         </div>
       )}
 
-      {/* ── DASHBOARD / WORKSPACE ────────────────── */}
+      {/* ── USER & DRIVER DASHBOARD WORKSPACES ────────────────── */}
       {currentView === 'workspace' && (
-        <>
-          {/* Welcome banner */}
-          <div className="bg-white border-b border-orange-100 py-4 px-4 sm:px-6 shadow-sm">
-            <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={() => setCurrentView('home')} className="text-xs font-semibold text-slate-500 hover:text-orange-600 flex items-center gap-1">
-                  <ArrowLeft className="w-3.5 h-3.5" /> Home
-                </button>
-                <div>
-                  <h1 className="text-xl font-extrabold text-gray-900">
-                    Welcome, <span className="text-orange-600">{currentUser.displayName}!</span>
-                  </h1>
-                  <button onClick={copyUid} className="text-[11px] text-slate-400 hover:text-slate-600 flex items-center gap-1 mt-0.5">
-                    {copiedUid ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                    <span>Your ID: {currentUser.id.slice(0, 20)}…</span>
-                  </button>
-                </div>
-              </div>
+        currentUser.role === 'driver' ? (
+          <DriverDashboard
+            currentUser={currentUser}
+            trips={trips}
+            onOpenTrip={(tripId) => {
+              setSelectedTripId(tripId);
+              setCurrentView('trip-workspace');
+            }}
+            onPublishTrip={() => setShowCreateTripModal(true)}
+            onEditTrip={(trip) => {
+              setSelectedTripId(trip.id);
+              setShowEditTripModal(true);
+            }}
+            onViewTripDetail={setDetailTrip}
+            onGoToHome={() => setCurrentView('home')}
+          />
+        ) : (
+          <UserDashboard
+            trips={trips}
+            onOpenTrip={(tripId, initialTab) => {
+              setSelectedTripId(tripId);
+              if (initialTab) setActiveTab(initialTab);
+              setCurrentView('trip-workspace');
+            }}
+            onViewTripDetail={setDetailTrip}
+            onGoToHome={() => setCurrentView('home')}
+          />
+        )
+      )}
 
-              <div className="flex items-center gap-3 text-xs flex-wrap">
-                {/* Trip selector */}
+      {/* ── DEDICATED TRIP WORKSPACE (Itinerary, Chat, Packing, Expenses) ── */}
+      {currentView === 'trip-workspace' && (
+        <div className="flex-1 bg-slate-50 flex flex-col">
+          {/* Top back bar */}
+          <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 shadow-xs">
+            <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+              <button
+                onClick={() => setCurrentView('workspace')}
+                className="text-xs font-bold text-slate-600 hover:text-orange-600 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" /> {currentUser.role === 'driver' ? 'Back to Driver Hub' : 'Back to Passenger Hub'}
+              </button>
+
+              <div className="flex items-center gap-2">
                 <div className="relative">
                   <select
                     value={activeTrip?.id || ''}
                     onChange={e => setSelectedTripId(e.target.value)}
-                    className="appearance-none bg-orange-50 border border-orange-200 text-gray-900 font-bold text-xs py-2 pl-3 pr-7 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 cursor-pointer"
+                    className="appearance-none bg-orange-50 border border-orange-200 text-gray-900 font-bold text-xs py-1.5 pl-3 pr-7 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400 cursor-pointer"
                   >
                     {trips.map(t => (
                       <option key={t.id} value={t.id}>{t.title}</option>
                     ))}
                   </select>
-                  <ChevronDown className="w-3.5 h-3.5 text-orange-400 absolute right-2 top-2.5 pointer-events-none" />
+                  <ChevronDown className="w-3.5 h-3.5 text-orange-400 absolute right-2 top-2 pointer-events-none" />
                 </div>
 
-                <button onClick={() => setShowWeatherDrawer(v => !v)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold border transition-colors ${showWeatherDrawer ? 'bg-orange-500 text-white border-orange-600' : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200'}`}>
+                <button
+                  onClick={() => setShowWeatherDrawer(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold border text-xs transition-colors cursor-pointer ${
+                    showWeatherDrawer
+                      ? 'bg-orange-500 text-white border-orange-600'
+                      : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200'
+                  }`}
+                >
                   <CloudSun className="w-3.5 h-3.5" /> Weather
                 </button>
 
-                <button onClick={() => setShowExportModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold bg-gray-900 hover:bg-gray-800 text-white transition-colors shadow-sm">
+                <button
+                  onClick={() => setShowExportModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold bg-gray-900 hover:bg-gray-800 text-white text-xs transition-colors shadow-sm cursor-pointer"
+                >
                   <Share2 className="w-3.5 h-3.5" /> Share Plan
                 </button>
 
                 {activeTrip?.ownerId === currentUser.id && (
-                  <button onClick={() => setShowEditTripModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold bg-white hover:bg-orange-50 text-gray-700 border border-orange-200 transition-colors shadow-sm">
+                  <button
+                    onClick={() => setShowEditTripModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold bg-white hover:bg-orange-50 text-gray-700 border border-orange-200 text-xs transition-colors shadow-sm cursor-pointer"
+                  >
                     <Edit3 className="w-3.5 h-3.5 text-orange-500" /> Manage Trip
                   </button>
                 )}
-
-                <button onClick={() => setShowCreateTripModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white transition-all shadow-sm">
-                  <Plus className="w-3.5 h-3.5" /> + Create New Trip
-                </button>
               </div>
             </div>
           </div>
 
-          {/* Dashboard 3-tab bar (Available / My Trips / Joined Trips) */}
-          <div className="bg-white border-b border-orange-100 px-4 sm:px-6">
-            <div className="max-w-7xl mx-auto">
-              <div className="flex text-sm font-medium border-b border-gray-200 -mb-px overflow-x-auto scrollbar-none">
-                {([
-                  { id: 'available', label: `Available Trips (${availableTrips.length})` },
-                  { id: 'my',        label: `My Trips (${myTrips.length})` },
-                  { id: 'joined',    label: `Joined Trips (${joinedTrips.length})` },
-                ] as const).map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setDashTab(tab.id)}
-                    className={`mr-4 py-3 border-b-2 transition-colors whitespace-nowrap font-semibold ${
-                      dashTab === tab.id
-                        ? 'border-orange-500 text-orange-600'
-                        : 'border-transparent text-gray-500 hover:text-orange-500 hover:border-orange-300'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Dashboard trip grid */}
-          {(dashTab === 'available' || dashTab === 'my' || dashTab === 'joined') && (
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 w-full">
-              {dashTab === 'available' && availableTrips.length === 0 && (
-                <div className="text-center py-12">
-                  <p className="text-gray-500 text-sm">No available trips at the moment.</p>
-                  <button onClick={() => setShowCreateTripModal(true)}
-                    className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-sm font-bold shadow-sm">
-                    <Plus className="w-4 h-4" /> Create the First Trip
-                  </button>
-                </div>
-              )}
-              {dashTab === 'my' && myTrips.length === 0 && (
-                <div className="text-center py-12">
-                  <p className="text-gray-500 text-sm">You haven't created any trips yet.</p>
-                  <button onClick={() => setShowCreateTripModal(true)}
-                    className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-sm font-bold shadow-sm">
-                    <Plus className="w-4 h-4" /> Create Your First Trip
-                  </button>
-                </div>
-              )}
-              {dashTab === 'joined' && joinedTrips.length === 0 && (
-                <div className="text-center py-12">
-                  <p className="text-gray-500 text-sm">You haven't joined any trips yet.</p>
-                  <button onClick={() => setDashTab('available')}
-                    className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-orange-100 text-orange-700 rounded-xl text-sm font-bold">
-                    Browse Available Trips
-                  </button>
-                </div>
-              )}
-
-              {/* Trip cards for each tab */}
-              {(() => {
-                const list = dashTab === 'available' ? availableTrips : dashTab === 'my' ? myTrips : joinedTrips;
-                return list.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {list.map(trip => {
-                      const organiser      = allUsers.find(u => u.id === trip.ownerId);
-                      const availableSeats = Math.max(0, (trip.totalSeats ?? 0) - trip.memberIds.length);
-                      const postedDate     = (() => { try { return new Date(trip.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return trip.startDate; } })();
-
-                      return (
-                        <div key={trip.id} className="trip-card rounded-2xl overflow-hidden flex flex-col justify-between group">
-                          <div>
-                            <div className="relative aspect-[16/9] bg-orange-50 overflow-hidden">
-                              <img src={trip.coverImage || '/src/assets/images/hero_travel_journey_1791735781773.jpg'}
-                                alt={trip.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                              <div className="absolute top-2.5 right-2.5 bg-gray-900/80 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg capitalize">
-                                {trip.travelStyle}
-                              </div>
-                              <div className="absolute bottom-2.5 left-2.5 flex gap-1.5 flex-wrap">
-                                <span className="text-xs bg-gradient-to-r from-orange-500 to-rose-500 text-white px-2 py-0.5 rounded font-semibold uppercase">{trip.status}</span>
-                                {dashTab === 'joined' && (
-                                  <span className="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded font-semibold flex items-center gap-1 shadow-xs">
-                                    <CheckCircle2 className="w-3 h-3" /> Confirmed Member
-                                  </span>
-                                )}
-                                {trip.vehicle && (
-                                  <span className="text-xs bg-gray-900/70 text-white px-2 py-0.5 rounded font-semibold flex items-center gap-1">
-                                    <Car className="w-3 h-3" />{trip.vehicle}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="p-4">
-                              <h3 className="font-bold text-gray-900 text-base mb-1 leading-snug">{trip.title}</h3>
-                              {/* Route */}
-                              <div className="flex items-center gap-1.5 text-xs text-gray-700 font-medium mb-1">
-                                <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0" />
-                                <span>{trip.origin}</span>
-                                <ArrowRight className="w-3 h-3 text-gray-400 shrink-0" />
-                                <span className="text-orange-600">{trip.destination}</span>
-                              </div>
-                              {/* Date / seats / cost */}
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 mb-1">
-                                <span className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  {trip.departureTime
-                                    ? new Date(trip.departureTime).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                                    : trip.startDate}
-                                </span>
-                                {trip.totalSeats && (
-                                  <span className={`flex items-center gap-1 font-semibold ${availableSeats === 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                                    <Users className="w-3 h-3" />{availableSeats === 0 ? 'Full' : `${availableSeats} seats left`}
-                                  </span>
-                                )}
-                                {trip.costPerPerson && (
-                                  <span className="font-semibold text-orange-600 flex items-center gap-0.5">
-                                    <IndianRupee className="w-3 h-3" />₹{trip.costPerPerson.toLocaleString('en-IN')}/seat
-                                  </span>
-                                )}
-                              </div>
-                              {/* Organiser + posted */}
-                              <div className="flex items-center gap-2 text-xs text-slate-400">
-                                {organiser ? (
-                                  <span className="flex items-center gap-1">
-                                    <img src={organiser.photoURL} alt="" className="w-4 h-4 rounded-full object-cover" referrerPolicy="no-referrer" />
-                                    <span className="font-semibold text-orange-600">{organiser.displayName}</span>
-                                  </span>
-                                ) : (
-                                  <span className="font-semibold text-orange-600">{trip.ownerName}</span>
-                                )}
-                                <span>· Posted {postedDate}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="px-4 pb-4 border-t border-orange-50 flex items-center justify-between pt-3">
-                            <div>
-                              <div className="text-[11px] text-slate-400">Budget</div>
-                              <div className="text-sm font-bold text-gray-900">₹{trip.budget.toLocaleString('en-IN')}</div>
-                            </div>
-                            <div className="flex gap-2">
-                              {dashTab === 'my' || dashTab === 'joined' ? (
-                                <button onClick={() => { setSelectedTripId(trip.id); setActiveTab('itinerary'); }}
-                                  className="px-3.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
-                                  Open Trip <ArrowRight className="w-3.5 h-3.5" />
-                                </button>
-                              ) : (
-                                <button onClick={() => setDetailTrip(trip)}
-                                  className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all">
-                                  <Info className="w-3.5 h-3.5" /> View &amp; Join
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null;
-              })()}
-            </div>
-          )}
-
-          {/* ── Workspace Sub-tabs ─────────────────── */}
+          {/* Workspace Sub-tabs */}
           <div className="bg-orange-50/80 border-t border-b border-orange-100 px-4 sm:px-6 py-2">
             <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto scrollbar-none text-xs">
               {([
@@ -461,9 +360,10 @@ function MainApp() {
                 { id: 'expenses',   icon: <IndianRupee className="w-3.5 h-3.5 text-emerald-500" />, label: 'Expenses' },
                 { id: 'memories',   icon: <Sparkles className="w-3.5 h-3.5 text-rose-500" />, label: 'Memories' },
               ] as const).map(tab => (
-                <button key={tab.id}
+                <button
+                  key={tab.id}
                   onClick={() => setActiveTab(tab.id as WorkspaceTab)}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-semibold transition-all whitespace-nowrap ${
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-semibold transition-all whitespace-nowrap cursor-pointer ${
                     activeTab === tab.id
                       ? 'bg-gradient-to-r from-orange-500 to-rose-500 text-white shadow-sm'
                       : 'text-gray-600 hover:text-orange-700 hover:bg-white'
@@ -477,7 +377,7 @@ function MainApp() {
             </div>
           </div>
 
-          {/* ── Workspace Body ─────────────────────── */}
+          {/* Workspace Body */}
           <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex-1 w-full space-y-6">
             {showWeatherDrawer && activeTrip && <TripWeatherWidget trip={activeTrip} />}
 
@@ -490,18 +390,24 @@ function MainApp() {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                   <div className="lg:col-span-5">
                     {activeTrip && (
-                      <ItineraryEditor trip={activeTrip} waypoints={waypoints}
+                      <ItineraryEditor
+                        trip={activeTrip}
+                        waypoints={waypoints}
                         activeWaypointId={activeWaypoint?.id}
                         onSelectWaypoint={wp => setActiveWaypoint(wp)}
                         pendingPinCoordinates={pendingPinCoords}
-                        onClearPendingPin={() => setPendingPinCoords(null)} />
+                        onClearPendingPin={() => setPendingPinCoords(null)}
+                      />
                     )}
                   </div>
                   <div className="lg:col-span-7 h-[620px]" style={{ isolation: 'isolate' }}>
-                    <TravelMap waypoints={waypoints} activeWaypointId={activeWaypoint?.id}
+                    <TravelMap
+                      waypoints={waypoints}
+                      activeWaypointId={activeWaypoint?.id}
                       onSelectWaypoint={wp => setActiveWaypoint(wp)}
                       onMapClick={(lat, lng) => { setPendingPinCoords({ lat, lng }); setActiveTab('itinerary'); }}
-                      center={activeWaypoint ? { lat: activeWaypoint.lat, lng: activeWaypoint.lng } : undefined} />
+                      center={activeWaypoint ? { lat: activeWaypoint.lat, lng: activeWaypoint.lng } : undefined}
+                    />
                   </div>
                 </div>
                 <div className="bg-white rounded-2xl border border-orange-100 p-6 shadow-sm">
@@ -510,8 +416,10 @@ function MainApp() {
                       <MessageSquare className="w-4 h-4 text-orange-500" />
                       Trip Group Channel
                     </h3>
-                    <button onClick={() => setActiveTab('channel')}
-                      className="text-xs font-semibold text-orange-600 hover:text-orange-800 flex items-center gap-1">
+                    <button
+                      onClick={() => setActiveTab('channel')}
+                      className="text-xs font-semibold text-orange-600 hover:text-orange-800 flex items-center gap-1 cursor-pointer"
+                    >
                       Full View <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -535,36 +443,131 @@ function MainApp() {
               </div>
             )}
 
-            {activeTab === 'packing'    && activeTrip && <PackingChecklist trip={activeTrip} />}
+            {activeTab === 'packing' && activeTrip && <PackingChecklist trip={activeTrip} />}
             {activeTab === 'companions' && (
-              <CompanionMatching currentTrip={activeTrip}
+              <CompanionMatching
+                currentTrip={activeTrip}
                 onInviteCompanion={user => {
                   if (activeTrip && !activeTrip.memberIds.includes(user.id))
                     handleTripUpdated({ ...activeTrip, memberIds: [...activeTrip.memberIds, user.id] });
                 }}
-                onTripUpdated={handleTripUpdated} />
+                onTripUpdated={handleTripUpdated}
+              />
             )}
             {activeTab === 'expenses' && activeTrip && <ExpenseTracker trip={activeTrip} />}
-            {activeTab === 'memories'  && <MemoryWall trip={activeTrip} />}
+            {activeTab === 'memories' && <MemoryWall trip={activeTrip} />}
           </main>
-        </>
+        </div>
       )}
 
-      {/* ── FOOTER ───────────────────────────────── */}
-      <footer className="bg-gray-800 text-gray-300 mt-16">
-        <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center">
-          <p className="font-semibold">
-            &copy; 2025 Smart Ride Sharing Platform. All rights reserved.
-          </p>
-          <p className="mt-2 text-sm text-gray-400">Travel Together, Save Together.</p>
-          <p className="mt-1 text-xs text-gray-500">
-            {isOnline
-              ? <span className="text-emerald-400 font-semibold">● Online</span>
-              : <span className="text-rose-400 font-semibold">● Offline — cached data</span>}
-            {' '}· Firestore Realtime · Google Maps & Vector Routing
-          </p>
-        </div>
-      </footer>
+      {/* ── FOOTER (Only visible on landing page) ── */}
+      {currentView === 'home' && (
+        <footer className="bg-slate-900 text-slate-300 mt-16 border-t border-slate-800">
+          {/* Safety, Support & Emergency SOS Bar */}
+          <div className="border-b border-slate-800/80 bg-slate-950/60 py-8 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto">
+              <div className="mb-5 text-center sm:text-left">
+                <span className="text-[11px] font-bold tracking-widest text-orange-400 uppercase">
+                  Trust, Safety &amp; Assistance Center
+                </span>
+                <h3 className="text-lg font-extrabold text-white mt-0.5">
+                  Always protected during your journeys
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* 1. Safety & Guidelines */}
+                <button
+                  type="button"
+                  onClick={() => setShowSafetyModal(true)}
+                  className="p-4 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/70 hover:border-emerald-500/50 text-left transition-all group flex items-start gap-3.5 cursor-pointer"
+                >
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors shrink-0">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white group-hover:text-emerald-300 transition-colors">
+                      Safety &amp; Verification
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                      Aadhaar ID checks, driver ratings, and safe travel protocols.
+                    </p>
+                  </div>
+                </button>
+
+                {/* 2. Help & Support */}
+                <button
+                  type="button"
+                  onClick={() => setShowHelpSupportModal(true)}
+                  className="p-4 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/70 hover:border-amber-500/50 text-left transition-all group flex items-start gap-3.5 cursor-pointer"
+                >
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-white transition-colors shrink-0">
+                    <LifeBuoy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
+                      Help &amp; Support
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                      24/7 incident assistance, FAQs, and ticket reporting.
+                    </p>
+                  </div>
+                </button>
+
+                {/* 3. Emergency SOS */}
+                <button
+                  type="button"
+                  onClick={() => setShowSosModal(true)}
+                  className="p-4 rounded-2xl bg-rose-950/30 hover:bg-rose-950/50 border border-rose-800/60 hover:border-rose-500 text-left transition-all group flex items-start gap-3.5 cursor-pointer ring-1 ring-rose-500/20 hover:ring-rose-500/50"
+                >
+                  <div className="p-2.5 rounded-xl bg-rose-600 text-white shrink-0 shadow-lg shadow-rose-900/40 animate-pulse">
+                    <Siren className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <h4 className="text-sm font-black text-rose-300 group-hover:text-white transition-colors">
+                        Emergency SOS
+                      </h4>
+                      <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-rose-600 text-white">
+                        Live
+                      </span>
+                    </div>
+                    <p className="text-xs text-rose-200/80 mt-0.5 leading-relaxed">
+                      One-click alert dispatching live GPS coordinates to contacts.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Brand Copyright & Status */}
+          <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center sm:flex sm:items-center sm:justify-between">
+            <div className="text-center sm:text-left">
+              <h4 className="font-brand text-xl font-bold text-white">
+                Smart Ride Sharing Platform
+              </h4>
+              <p className="mt-1 text-xs text-slate-400">
+                Travel Together, Save Together. &copy; {new Date().getFullYear()} All rights reserved.
+              </p>
+            </div>
+
+            <div className="mt-4 sm:mt-0 text-xs text-slate-500 flex items-center justify-center sm:justify-end gap-2">
+              {isOnline ? (
+                <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Online
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-rose-400 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-rose-400" /> Offline (cached)
+                </span>
+              )}
+              <span>·</span>
+              <span>Firestore Realtime Sync</span>
+            </div>
+          </div>
+        </footer>
+      )}
 
       {/* ── MODALS ───────────────────────────────── */}
       <CreateTripModal isOpen={showCreateTripModal} onClose={() => setShowCreateTripModal(false)} onTripCreated={handleTripCreated} />

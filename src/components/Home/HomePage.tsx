@@ -188,20 +188,20 @@ export const HomePage: React.FC<HomePageProps> = ({
                     Find a Trip <ArrowRight className="w-4 h-4" />
                   </button>
 
-                  {/* Host trip — only when logged in */}
+                  {/* Action based on user role */}
                   {isLoggedIn ? (
                     <button
-                      onClick={onHostTrip}
-                      className="inline-flex items-center gap-2 px-8 py-3 rounded-md text-orange-700 bg-orange-100 hover:bg-orange-200 font-semibold text-base shadow-sm transition-all md:py-4 md:text-lg md:px-10"
+                      onClick={onStartPlanning}
+                      className="inline-flex items-center gap-2 px-8 py-3 rounded-md text-orange-700 bg-orange-100 hover:bg-orange-200 font-semibold text-base shadow-sm transition-all md:py-4 md:text-lg md:px-10 cursor-pointer"
                     >
-                      <Plus className="w-4 h-4" /> Create a Trip
+                      {currentUser.role === 'driver' ? 'My Driver Hub' : 'My Bookings'}
                     </button>
                   ) : (
                     <button
                       onClick={onGoToLogin}
-                      className="inline-flex items-center gap-2 px-8 py-3 rounded-md text-sky-700 bg-sky-50 hover:bg-sky-100 font-semibold text-base border border-sky-200 shadow-sm transition-all md:py-4 md:text-lg md:px-10"
+                      className="inline-flex items-center gap-2 px-8 py-3 rounded-md text-sky-700 bg-sky-50 hover:bg-sky-100 font-semibold text-base border border-sky-200 shadow-sm transition-all md:py-4 md:text-lg md:px-10 cursor-pointer"
                     >
-                      Sign In to Host a Trip
+                      Sign In to Get Started
                     </button>
                   )}
                 </div>
@@ -391,14 +391,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                 : 'Sign in to send join requests to trip hosts.'}
             </p>
           </div>
-          {isLoggedIn && (
-            <button
-              onClick={onHostTrip}
-              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm hover:from-orange-600 hover:to-rose-600 transition-all"
-            >
-              <Plus className="w-3.5 h-3.5" /> + Create New Trip
-            </button>
-          )}
         </div>
 
         {/* LOADING STATE */}
@@ -431,20 +423,30 @@ export const HomePage: React.FC<HomePageProps> = ({
                 </button>
               )}
               {isLoggedIn ? (
-                <button
-                  type="button"
-                  onClick={onHostTrip}
-                  className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Host this Route
-                </button>
+                currentUser.role === 'driver' ? (
+                  <button
+                    type="button"
+                    onClick={onHostTrip}
+                    className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Offer this Route
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onStartPlanning}
+                    className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+                  >
+                    View My Bookings
+                  </button>
+                )
               ) : (
                 <button
                   type="button"
                   onClick={onGoToLogin}
-                  className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+                  className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
                 >
-                  Sign In to Host this Trip
+                  Sign In to Join
                 </button>
               )}
             </div>
@@ -708,17 +710,10 @@ export const HomePage: React.FC<HomePageProps> = ({
             </p>
           </div>
           <div className="flex items-center gap-3 shrink-0 flex-wrap">
-            {isLoggedIn ? (
-              <button
-                onClick={onHostTrip}
-                className="px-6 py-3.5 bg-white hover:bg-orange-50 text-orange-700 rounded-xl font-bold text-sm shadow-md flex items-center gap-2 transition-colors"
-              >
-                <Plus className="w-4 h-4" /> Create a Trip
-              </button>
-            ) : (
+            {!isLoggedIn && (
               <button
                 onClick={onGoToLogin}
-                className="px-6 py-3.5 bg-white hover:bg-orange-50 text-orange-700 rounded-xl font-bold text-sm shadow-md transition-colors"
+                className="px-6 py-3.5 bg-white hover:bg-orange-50 text-orange-700 rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
               >
                 Sign In to Get Started
               </button>
